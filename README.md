@@ -1,7 +1,7 @@
 # Cinematic Camera GUI & System Control `V7.0 - Advanced`
 
 <p align="center">
-  <img src="https://media.tenor.com/Xj-P5hSp-5MAAAAi/megakot-gif.gif" alt="MegaKot GIF" width="220">
+  <img src="https://c.tenor.com/wrqESzPzXvMAAAAC/tenor.gif" alt="MegaKot GIF" width="410">
 </p>
 
 [![Version](https://img.shields.io/badge/Version-7.0--Advanced_Revision-blueviolet?style=for-the-badge&logo=roblox)](https://roblox.com)
