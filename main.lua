@@ -1,11 +1,3 @@
--- =============================================================================
--- CINEMATIC CAMERA GUI & SYSTEM CONTROL (V7 - ADVANCED CINEMATICS REVISION)
--- Optimized for Delta Executor, Mobile & PC Responsive Layout
--- Incorporates absolute fail-safe error copying mechanism
--- (script by hakiraadityaa)
--- =============================================================================
-
--- Global Settings Table
 local cinematicSettings = {
     Active = false,
     CurrentStyle = "Orbit",
@@ -1222,9 +1214,6 @@ local initSuccess, initError = xpcall(function()
         stopTargetSelection()
     end)
 
-    -- =========================================================================
-    -- RUNNING LOADING SIMULATION & LAUNCH PROCESS (5-SECOND ACCUMULATIVE)
-    -- =========================================================================
     task.spawn(function()
         -- Sequential steps designed to last exactly ~5 seconds in total wait time
         local steps = {
@@ -1290,5 +1279,3 @@ end, function(err)
         print("[Cinematic GUI]: Complete traceback details copied to clipboard automatically.")
     end
 end)
-
--- Finish (script by hakiraadityaa)
