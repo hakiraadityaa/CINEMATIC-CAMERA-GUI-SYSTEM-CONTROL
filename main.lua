@@ -7,7 +7,7 @@ local cinematicSettings = {
     Tilt = 0,
     VelocityZoom = false,
     PostProcessing = false,
-    Target = nil            -- Target Player/Character Instance
+    Target = nil
 }
 
 -- Modern Styling Theme Colors
@@ -279,6 +279,40 @@ local initSuccess, initError = xpcall(function()
                 local targetPos = hrp.Position + Vector3.new(0, 1, 0)
                 local targetCF = CFrame.new(hrp.Position + sideOffset, targetPos)
                 cam.CFrame = cam.CFrame:Lerp(targetCF, 0.08)
+
+            elseif cinematicSettings.CurrentStyle == "Bodycam" then
+                -- Immersive GoPro Chest / Bodycam Mount Style (New v9.0.0 Feature)
+                local char = hrp.Parent
+                local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+                local isMoving = hrp.AssemblyLinearVelocity.Magnitude > 2
+                
+                local bobX, bobY = 0, 0
+                local speed = (humanoid and humanoid.WalkSpeed) or 16
+                
+                if isMoving then
+                    -- Tactical walk/run bobbing
+                    local t = tick() * (speed * 0.75 * cinematicSettings.Speed)
+                    bobY = math.sin(t) * 0.18 * cinematicSettings.ShakeIntensity
+                    bobX = math.cos(t * 0.5) * 0.1 * cinematicSettings.ShakeIntensity
+                else
+                    -- Smooth breathing sway while standing still
+                    local t = tick() * (2 * cinematicSettings.Speed)
+                    bobY = math.sin(t) * 0.04
+                    bobX = math.cos(t * 0.5) * 0.02
+                end
+                
+                -- Positioning camera slightly below the head, slightly forward
+                local bodycamOffset = Vector3.new(0, 1.4, 0.6) -- 1.4 studs up, 0.6 studs forward
+                local chestPos = hrp.Position + hrp.CFrame.LookVector * bodycamOffset.Z + Vector3.new(0, bodycamOffset.Y, 0)
+                
+                -- Apply the bobbing offset locally using RightVector and UpVector
+                local finalPos = chestPos + (hrp.CFrame.RightVector * bobX) + (Vector3.new(0, bobY, 0))
+                
+                -- Looking ahead of the chest movement
+                local targetLook = hrp.Position + hrp.CFrame.LookVector * 20 + Vector3.new(0, 1.4, 0)
+                
+                local targetCF = CFrame.new(finalPos, targetLook)
+                cam.CFrame = cam.CFrame:Lerp(targetCF, 0.16)
             end
             
             -- Apply Dutch Angle Tilt
@@ -718,7 +752,7 @@ local initSuccess, initError = xpcall(function()
         TweenService:Create(ToggleBtn, TweenInfo.new(0.2), { BackgroundColor3 = targetColor }):Play()
     end)
 
-    -- 2. Style Selection Control Card (Expanded Presets)
+    -- 2. Style Selection Control Card (Expanded Presets in v9.0.0)
     local StylesCard = create("Frame", {
         Name = "StylesCard",
         Size = UDim2.new(0.92, 0, 0, 105),
@@ -760,7 +794,8 @@ local initSuccess, initError = xpcall(function()
         Padding = UDim.new(0, 8)
     })
 
-    local styles = {"Orbit", "Epic Pan", "Dynamic Follow", "Handheld Shaky", "Static Scenic", "Dolly Zoom", "Crane Shot", "Side Profile"}
+    -- Added GoPro Bodycam Preset
+    local styles = {"Orbit", "Epic Pan", "Dynamic Follow", "Handheld Shaky", "Static Scenic", "Dolly Zoom", "Crane Shot", "Side Profile", "Bodycam"}
     local styleButtons = {}
 
     local function selectStyle(styleName)
@@ -931,7 +966,7 @@ local initSuccess, initError = xpcall(function()
         cinematicSettings.ShakeIntensity = value
     end)
 
-    -- New Feature Slider: Camera Tilt / Dutch Angle (LayoutOrder 6)
+    -- Camera Tilt / Dutch Angle Slider
     createSlider("Camera Tilt (Dutch Angle)", -30, 30, 0, 6, function(value)
         cinematicSettings.Tilt = value
     end)
@@ -998,7 +1033,7 @@ local initSuccess, initError = xpcall(function()
         setVelocityZoomState(not cinematicSettings.VelocityZoom)
     end)
 
-    -- New Feature Card: Cinematic Lighting Toggle Card (LayoutOrder 8)
+    -- Cinematic Lighting Toggle Card (LayoutOrder 8)
     local LightingCard = create("Frame", {
         Name = "LightingCard",
         Size = UDim2.new(0.92, 0, 0, 50),
@@ -1062,7 +1097,7 @@ local initSuccess, initError = xpcall(function()
         setLightingState(not cinematicSettings.PostProcessing)
     end)
 
-    -- New Feature Card: User-Friendly Target Lock Selection Card (LayoutOrder 9)
+    -- User-Friendly Target Lock Selection Card (LayoutOrder 9)
     local TargetCard = create("Frame", {
         Name = "TargetCard",
         Size = UDim2.new(0.92, 0, 0, 50),
@@ -1096,7 +1131,7 @@ local initSuccess, initError = xpcall(function()
         TextXAlignment = Enum.TextXAlignment.Left
     }, TargetCard)
 
-    -- User-Friendly Target TextBox (Menggantikan selektor klik yang rawan bug)
+    -- Target TextBox (Mencocokkan nama dan display name)
     local TargetTextBox = create("TextBox", {
         Name = "TargetTextBox",
         Size = UDim2.new(0.35, 0, 0.6, 0),
@@ -1120,13 +1155,10 @@ local initSuccess, initError = xpcall(function()
         ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     }, TargetTextBox)
 
-    -- Logika Input Handler (Bekerja sempurna di mobile tap-outside maupun PC enter)
     safeConnect(TargetTextBox.FocusLost, function()
         local rawInput = TargetTextBox.Text
-        -- Menghapus awalan pencarian opsional & spasi kosong
         local cleanInput = rawInput:gsub("^Target:%s*", ""):gsub("%s+", "")
         
-        -- Fallback Reset jika input kosong atau bermakna diri sendiri
         if cleanInput == "" or cleanInput:lower() == "me" or cleanInput:lower() == "self" then
             cinematicSettings.Target = nil
             TargetTextBox.Text = "Target: Self"
@@ -1137,18 +1169,15 @@ local initSuccess, initError = xpcall(function()
         
         local targetPlayer = findTargetByPartialName(cleanInput)
         if targetPlayer then
-            -- Sukses Menemukan Target
             cinematicSettings.Target = targetPlayer
             TargetTextBox.Text = "Target: " .. targetPlayer.Name:sub(1, 10)
             TweenService:Create(TargetStroke, TweenInfo.new(0.3), { Color = COLOR_GREEN }):Play()
             resetStyleVars()
         else
-            -- Target Tidak Ditemukan (Umpan Balik Visual Merah)
             TargetTextBox.Text = "NOT FOUND!"
             TweenService:Create(TargetStroke, TweenInfo.new(0.2), { Color = COLOR_RED }):Play()
             task.wait(1.5)
             
-            -- Kembalikan teks ke status pelacakan aktif sebelumnya
             if cinematicSettings.Target then
                 TargetTextBox.Text = "Target: " .. cinematicSettings.Target.Name:sub(1, 10)
                 TweenService:Create(TargetStroke, TweenInfo.new(0.3), { Color = COLOR_GREEN }):Play()
@@ -1250,13 +1279,13 @@ local initSuccess, initError = xpcall(function()
     -- RUNNING LOADING SIMULATION & LAUNCH PROCESS (5-SECOND ACCUMULATIVE)
     -- =========================================================================
     task.spawn(function()
-        -- Sequential steps designed to last exactly ~5 seconds in total wait time
+        -- Sequential steps designed to last exactly ~5 seconds in total wait time (v9.0.0 localized modules)
         local steps = {
-            { progress = 0.15, message = "Connecting to Local Workspace Modules..." },
-            { progress = 0.40, message = "Loading Responsive GUI Components & Assets..." },
-            { progress = 0.65, message = "Configuring Cinematic Presets & Movement Math..." },
-            { progress = 0.85, message = "Injecting Failsafe Protection & Error Logger..." },
-            { progress = 1.00, message = "System Ready! Booting Panel..." }
+            { progress = 0.15, message = "Inisialisasi Core Engine v9.0.0..." },
+            { progress = 0.40, message = "Memuat Modul GoPro Bodycam & Physics Preset..." },
+            { progress = 0.65, message = "Mengkonfigurasi Pencahayaan & Efek Depth of Field..." },
+            { progress = 0.85, message = "Memasang Proteksi Failsafe & Auto-Clipboard Handler..." },
+            { progress = 1.00, message = "Modul Siap! Membuka Panel..." }
         }
 
         for _, step in ipairs(steps) do
