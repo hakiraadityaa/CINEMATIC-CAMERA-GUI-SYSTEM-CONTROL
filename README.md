@@ -1,5 +1,9 @@
 # Cinematic Camera GUI & System Control `V7.0 - Advanced`
 
+<p align="center">
+  <img src="https://media.tenor.com/Xj-P5hSp-5MAAAAi/megakot-gif.gif" alt="MegaKot GIF" width="220">
+</p>
+
 [![Version](https://img.shields.io/badge/Version-7.0--Advanced_Revision-blueviolet?style=for-the-badge&logo=roblox)](https://roblox.com)
 [![Executor Compatibility](https://img.shields.io/badge/Executor-Delta_/_Mobile_/_PC-green?style=for-the-badge&logo=lua)](https://lua.org)
 [![UI Responsive](https://img.shields.io/badge/UI_Scale-Dynamic_Responsive-orange?style=for-the-badge)](https://roblox.com)
