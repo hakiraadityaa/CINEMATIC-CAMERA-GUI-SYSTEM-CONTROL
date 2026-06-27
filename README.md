@@ -89,7 +89,9 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/hakiraadityaa/CINEMAT
 ```
 
 ---
-*(script by hakiraadityaa)*
+<p align="center">
+ *(script by hakiraadityaa)*
+</p>
 <p align="center">
   <img src="https://media.tenor.com/L-IjAK9S05kAAAAi/madoka.gif" alt="Madoka GIF" width="220">
 </p>
