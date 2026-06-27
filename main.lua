@@ -4,10 +4,10 @@ local cinematicSettings = {
     Speed = 1,
     FOV = 70,
     ShakeIntensity = 1,
-    Tilt = 0,               -- Dutch Angle/Tilt setting
+    Tilt = 0,
     VelocityZoom = false,
-    PostProcessing = false,  -- Cinematic Lighting toggle
-    Target = nil            -- Target lock variable (Nil defaults to Self)
+    PostProcessing = false,
+    Target = nil            -- Target Player/Character Instance
 }
 
 -- Modern Styling Theme Colors
@@ -157,17 +157,47 @@ local initSuccess, initError = xpcall(function()
             Name = "CinematicCC_Hakira",
             Contrast = 0.04,
             Saturation = 0.05,
-            TintColor = Color3.fromRGB(255, 252, 245) -- Soft Warm Vibe
+            TintColor = Color3.fromRGB(255, 252, 245)
         }, Lighting)
         table.insert(activeEffects, cc)
     end
 
-    -- Target Selector Fallback resolver
+    -- Target Selector Fallback resolver (Supports Player and Character Instance safety)
     local function getFocusTarget()
-        if cinematicSettings.Target and cinematicSettings.Target.Parent and cinematicSettings.Target:FindFirstChild("HumanoidRootPart") then
-            return cinematicSettings.Target.HumanoidRootPart
+        if cinematicSettings.Target then
+            local char = nil
+            if cinematicSettings.Target:IsA("Player") then
+                char = cinematicSettings.Target.Character
+            elseif cinematicSettings.Target:IsA("Model") then
+                char = cinematicSettings.Target
+            end
+            
+            if char and char.Parent and char:FindFirstChild("HumanoidRootPart") then
+                return char.HumanoidRootPart
+            end
         end
         return localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
+    end
+
+    -- Cerdas Partial Search Algorithm (Mencocokkan awalan & bagian nama secara instan)
+    local function findTargetByPartialName(name)
+        name = name:lower():gsub("%s+", "")
+        if name == "" or name == "me" or name == "self" then
+            return nil
+        end
+        -- Cari kecocokan prefix awal terlebih dahulu
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p.Name:lower():sub(1, #name) == name or p.DisplayName:lower():sub(1, #name) == name then
+                return p
+            end
+        end
+        -- Cari kecocokan substring acak
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p.Name:lower():find(name, 1, true) or p.DisplayName:lower():find(name, 1, true) then
+                return p
+            end
+        end
+        return nil
     end
 
     local function stopCinematic()
@@ -231,7 +261,6 @@ local initSuccess, initError = xpcall(function()
                 cam.CFrame = cam.CFrame:Lerp(targetCF, 0.04)
 
             elseif cinematicSettings.CurrentStyle == "Dolly Zoom" then
-                -- Classic Hitchcock Vertigo effect
                 local dist = 14 + math.sin(angle) * 8
                 local targetPos = hrp.Position + Vector3.new(0, 1.5, 0)
                 local offset = -hrp.CFrame.LookVector * dist + Vector3.new(0, 2, 0)
@@ -239,7 +268,6 @@ local initSuccess, initError = xpcall(function()
                 cam.CFrame = cam.CFrame:Lerp(targetCF, 0.08)
 
             elseif cinematicSettings.CurrentStyle == "Crane Shot" then
-                -- Tall sweep looking downward at target
                 local height = 3 + math.clamp(math.sin(angle) * 14, -2, 14)
                 local offset = Vector3.new(math.cos(angle * 0.5) * 18, height, math.sin(angle * 0.5) * 18)
                 local targetPos = hrp.Position + Vector3.new(0, 1.5, 0)
@@ -247,7 +275,6 @@ local initSuccess, initError = xpcall(function()
                 cam.CFrame = cam.CFrame:Lerp(targetCF, 0.05)
 
             elseif cinematicSettings.CurrentStyle == "Side Profile" then
-                -- Sliding shot parallel to target side profile
                 local sideOffset = hrp.CFrame.RightVector * 15 + Vector3.new(0, 2, 0)
                 local targetPos = hrp.Position + Vector3.new(0, 1, 0)
                 local targetCF = CFrame.new(hrp.Position + sideOffset, targetPos)
@@ -284,6 +311,20 @@ local initSuccess, initError = xpcall(function()
         if cinematicSettings.Active then
             newChar:WaitForChild("HumanoidRootPart")
             resetStyleVars()
+        end
+    end)
+
+    -- Player Leaving Safeguard (Mencegah tumpukan memori atau crash jika target keluar game)
+    safeConnect(Players.PlayerRemoving, function(player)
+        if cinematicSettings.Target and (cinematicSettings.Target == player or cinematicSettings.Target == player.Character) then
+            cinematicSettings.Target = nil
+            resetStyleVars()
+            local targetCard = parentUI:FindFirstChild("CinematicGUI_Hakira") and parentUI.CinematicGUI_Hakira:FindFirstChild("TargetCard", true)
+            local box = targetCard and targetCard:FindFirstChildOfClass("TextBox")
+            if box then
+                box.Text = "Target: Self"
+                TweenService:Create(box.UIStroke, TweenInfo.new(0.3), { Color = COLOR_ACCENT }):Play()
+            end
         end
     end)
 
@@ -463,7 +504,7 @@ local initSuccess, initError = xpcall(function()
         BackgroundColor3 = COLOR_BG,
         BorderSizePixel = 0,
         ClipsDescendants = true,
-        Visible = false -- Kept invisible until loading screen finishes
+        Visible = false
     }, ScreenGui)
     create("UICorner", { CornerRadius = UDim.new(0, 16) }, MainFrame)
     
@@ -526,7 +567,7 @@ local initSuccess, initError = xpcall(function()
         Size = UDim2.new(0, 18, 0, 18),
         Position = UDim2.new(0.95, -22, 0.5, -9),
         BackgroundTransparency = 1,
-        Image = "rbxassetid://9886659671", -- Lucide X Icon
+        Image = "rbxassetid://9886659671",
         ImageColor3 = COLOR_TEXT_MUTED,
         BorderSizePixel = 0
     }, Header)
@@ -719,7 +760,6 @@ local initSuccess, initError = xpcall(function()
         Padding = UDim.new(0, 8)
     })
 
-    -- Added 3 New Epic Presets: Dolly Zoom, Crane Shot, Side Profile
     local styles = {"Orbit", "Epic Pan", "Dynamic Follow", "Handheld Shaky", "Static Scenic", "Dolly Zoom", "Crane Shot", "Side Profile"}
     local styleButtons = {}
 
@@ -1022,7 +1062,7 @@ local initSuccess, initError = xpcall(function()
         setLightingState(not cinematicSettings.PostProcessing)
     end)
 
-    -- New Feature Card: Target Lock Selection Card (LayoutOrder 9)
+    -- New Feature Card: User-Friendly Target Lock Selection Card (LayoutOrder 9)
     local TargetCard = create("Frame", {
         Name = "TargetCard",
         Size = UDim2.new(0.92, 0, 0, 50),
@@ -1049,81 +1089,74 @@ local initSuccess, initError = xpcall(function()
         Size = UDim2.new(0.55, 0, 0.3, 0),
         Position = UDim2.new(0.05, 0, 0.55, 0),
         BackgroundTransparency = 1,
-        Text = "Focus camera style on another player",
+        Text = "Input username to track player",
         TextColor3 = COLOR_TEXT_MUTED,
         Font = FontFaceMedium,
         TextSize = 9,
         TextXAlignment = Enum.TextXAlignment.Left
     }, TargetCard)
 
-    local TargetSelectBtn = create("TextButton", {
-        Name = "TargetSelectBtn",
-        Size = UDim2.new(0.32, 0, 0.6, 0),
-        Position = UDim2.new(0.63, 0, 0.2, 0),
-        BackgroundColor3 = COLOR_HEADER,
+    -- User-Friendly Target TextBox (Menggantikan selektor klik yang rawan bug)
+    local TargetTextBox = create("TextBox", {
+        Name = "TargetTextBox",
+        Size = UDim2.new(0.35, 0, 0.6, 0),
+        Position = UDim2.new(0.6, 0, 0.2, 0),
+        BackgroundColor3 = COLOR_BG,
         Text = "Target: Self",
+        PlaceholderText = "Type Name...",
+        PlaceholderColor3 = COLOR_TEXT_MUTED,
         TextColor3 = COLOR_TEXT,
         Font = FontFace,
         TextSize = 9,
-        BorderSizePixel = 0
+        BorderSizePixel = 0,
+        ClearTextOnFocus = true,
+        ClipsDescendants = true
     }, TargetCard)
-    create("UICorner", { CornerRadius = UDim.new(0, 8) }, TargetSelectBtn)
-    create("UIStroke", { Color = COLOR_ACCENT, Thickness = 1.2, Transparency = 0.5 }, TargetSelectBtn)
+    create("UICorner", { CornerRadius = UDim.new(0, 8) }, TargetTextBox)
+    
+    local TargetStroke = create("UIStroke", {
+        Color = COLOR_ACCENT,
+        Thickness = 1.2,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    }, TargetTextBox)
 
-    -- Raycast Touch Target Selector Logic
-    local selectionConnection = nil
-    local function stopTargetSelection()
-        if selectionConnection then
-            selectionConnection:Disconnect()
-            selectionConnection = nil
-        end
-    end
-
-    local function startTargetSelection()
-        stopTargetSelection()
-        TargetSelectBtn.Text = "TAP A PLAYER..."
-        TargetSelectBtn.BackgroundColor3 = COLOR_GREEN
+    -- Logika Input Handler (Bekerja sempurna di mobile tap-outside maupun PC enter)
+    safeConnect(TargetTextBox.FocusLost, function()
+        local rawInput = TargetTextBox.Text
+        -- Menghapus awalan pencarian opsional & spasi kosong
+        local cleanInput = rawInput:gsub("^Target:%s*", ""):gsub("%s+", "")
         
-        selectionConnection = safeConnect(UserInputService.InputBegan, function(input, processed)
-            if processed then return end
-            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-                local mousePos = input.Position
-                if input.UserInputType == Enum.UserInputType.Touch then
-                    mousePos = UserInputService:GetMouseLocation()
-                end
-                
-                local camera = workspace.CurrentCamera
-                local unitRay = camera:ScreenPointToRay(mousePos.X, mousePos.Y)
-                
-                local params = RaycastParams.new()
-                params.FilterType = Enum.RaycastFilterType.Exclude
-                params.FilterDescendantsInstances = {localPlayer.Character}
-                
-                local result = workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, params)
-                if result and result.Instance then
-                    local model = result.Instance:FindFirstAncestorOfClass("Model")
-                    if model and model:FindFirstChild("HumanoidRootPart") then
-                        cinematicSettings.Target = model
-                        TargetSelectBtn.Text = "Target: " .. model.Name:sub(1, 10)
-                        TargetSelectBtn.BackgroundColor3 = COLOR_ACCENT
-                        stopTargetSelection()
-                        resetStyleVars()
-                        return
-                    end
-                end
-                
-                -- Reset target if clicked on empty space
-                cinematicSettings.Target = nil
-                TargetSelectBtn.Text = "Target: Self"
-                TargetSelectBtn.BackgroundColor3 = COLOR_HEADER
-                stopTargetSelection()
-                resetStyleVars()
+        -- Fallback Reset jika input kosong atau bermakna diri sendiri
+        if cleanInput == "" or cleanInput:lower() == "me" or cleanInput:lower() == "self" then
+            cinematicSettings.Target = nil
+            TargetTextBox.Text = "Target: Self"
+            TweenService:Create(TargetStroke, TweenInfo.new(0.3), { Color = COLOR_ACCENT }):Play()
+            resetStyleVars()
+            return
+        end
+        
+        local targetPlayer = findTargetByPartialName(cleanInput)
+        if targetPlayer then
+            -- Sukses Menemukan Target
+            cinematicSettings.Target = targetPlayer
+            TargetTextBox.Text = "Target: " .. targetPlayer.Name:sub(1, 10)
+            TweenService:Create(TargetStroke, TweenInfo.new(0.3), { Color = COLOR_GREEN }):Play()
+            resetStyleVars()
+        else
+            -- Target Tidak Ditemukan (Umpan Balik Visual Merah)
+            TargetTextBox.Text = "NOT FOUND!"
+            TweenService:Create(TargetStroke, TweenInfo.new(0.2), { Color = COLOR_RED }):Play()
+            task.wait(1.5)
+            
+            -- Kembalikan teks ke status pelacakan aktif sebelumnya
+            if cinematicSettings.Target then
+                TargetTextBox.Text = "Target: " .. cinematicSettings.Target.Name:sub(1, 10)
+                TweenService:Create(TargetStroke, TweenInfo.new(0.3), { Color = COLOR_GREEN }):Play()
+            else
+                TargetTextBox.Text = "Target: Self"
+                TweenService:Create(TargetStroke, TweenInfo.new(0.3), { Color = COLOR_ACCENT }):Play()
             end
-        end)
-    end
-
-    safeConnect(TargetSelectBtn.MouseButton1Click, function()
-        startTargetSelection()
+        end
     end)
 
     -- 5. Hide Control Card (Cinematic View - LayoutOrder 10)
@@ -1181,7 +1214,7 @@ local initSuccess, initError = xpcall(function()
 
     -- Double-Tap Gesture Logic (Fires on both PC Clicks and Mobile Touch Taps)
     local lastTap = 0
-    local doubleTapThreshold = 0.40 -- Seconds threshold for double-tap detection
+    local doubleTapThreshold = 0.40
 
     safeConnect(InvisibleRestoreBtn.MouseButton1Click, function()
         local currentTick = tick()
@@ -1211,9 +1244,11 @@ local initSuccess, initError = xpcall(function()
     -- Guard for manual destruction from external forces (prevents memory leaks)
     safeConnect(ScreenGui.Destroying, function()
         setCinematicState(false)
-        stopTargetSelection()
     end)
 
+    -- =========================================================================
+    -- RUNNING LOADING SIMULATION & LAUNCH PROCESS (5-SECOND ACCUMULATIVE)
+    -- =========================================================================
     task.spawn(function()
         -- Sequential steps designed to last exactly ~5 seconds in total wait time
         local steps = {
@@ -1230,7 +1265,7 @@ local initSuccess, initError = xpcall(function()
             })
             fillTween:Play()
             StatusText.Text = step.message
-            task.wait(1.0) -- 5 steps * 1 second = 5.0 seconds total wait duration
+            task.wait(1.0)
         end
 
         -- Safe fade out helper for nested UI elements
@@ -1251,7 +1286,7 @@ local initSuccess, initError = xpcall(function()
                     TweenService:Create(child, tweenInfo, { Transparency = 1 }):Play()
                 end
             end
-            local bgTween = TweenService:Create(element, tweenInfo, { BackgroundTransparency = 1 })
+            local bgTween = TweenService:Create(element, tweenInfo, { BackgroundColor3 = COLOR_BG, BackgroundTransparency = 1 })
             bgTween:Play()
             bgTween.Completed:Wait()
         end
@@ -1279,3 +1314,5 @@ end, function(err)
         print("[Cinematic GUI]: Complete traceback details copied to clipboard automatically.")
     end
 end)
+
+-- Finish (script by hakiraadityaa)
