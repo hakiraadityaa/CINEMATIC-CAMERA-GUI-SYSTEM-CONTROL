@@ -1,56 +1,92 @@
-# Cinematic Camera GUI & System Control (V7 - Advanced Revision)
-**Cinematic Camera GUI & System Control** adalah skrip utilitas kamera sinematik kelas profesional yang dirancang khusus untuk pembuat konten, videografer Roblox, dan pemain yang ingin mengambil cuplikan visual (*cinematic showcase*) berkualitas tinggi. Skrip ini dioptimalkan penuh untuk kenyamanan pengguna perangkat mobile (seperti **Delta Executor**) maupun PC, dengan antarmuka dinamis, responsif, dan bebas dari kebocoran memori (*memory leaks*).
+# Cinematic Camera GUI & System Control `V7.0 - Advanced`
+
+[![Version](https://img.shields.io/badge/Version-7.0--Advanced_Revision-blueviolet?style=for-the-badge&logo=roblox)](https://roblox.com)
+[![Executor Compatibility](https://img.shields.io/badge/Executor-Delta_/_Mobile_/_PC-green?style=for-the-badge&logo=lua)](https://lua.org)
+[![UI Responsive](https://img.shields.io/badge/UI_Scale-Dynamic_Responsive-orange?style=for-the-badge)](https://roblox.com)
+[![Memory Leaks](https://img.shields.io/badge/Memory_Leaks-0%25_Safe-red?style=for-the-badge)](https://roblox.com)
+
+**Cinematic Camera GUI & System Control** adalah skrip utilitas kamera sinematik kelas profesional yang dirancang khusus untuk para kreator konten, videografer Roblox, dan pengembang *showcase* game. Skrip ini menghadirkan pergerakan kamera mekanis kelas atas dengan antarmuka modern yang sangat ringan, responsif pada layar mobile terkecil, dan bebas dari kebocoran memori (*memory leaks*).
 
 ---
 
-## 🌟 Fitur Utama
+## 🛠️ Spesifikasi Teknis & Arsitektur
 
-### 1. Inisialisasi & Keamanan Terintegrasi
-*   **Epic Loading Screen (5 Detik)**: Layar pemuatan berdurasi 5 detik dengan animasi bar progresif yang estetik. Menampilkan foto profil avatar Roblox pengguna secara langsung (*headshot*), Display Name, Username, User ID, serta atribusi kreator.
-*   **Failsafe & Auto-Copy Error**: Sistem penanganan kesalahan (*fail-safe*) tingkat lanjut. Jika terjadi kendala sistem saat eksekusi atau runtime, detail error beserta runtutan baris kodenya (*traceback*) akan **otomatis tersalin ke clipboard** untuk mempermudah proses evaluasi pengembang.
+> [!IMPORTANT]
+> Skrip ini menggunakan model penanganan error **Thread Failsafe** dengan pembungkus `xpcall` pada setiap interaksi. Jika terjadi kesalahan (*crash*/*runtime error*), detail pesan kesalahan beserta tumpukan baris kodenya (*traceback*) akan **otomatis tersalin ke clipboard** untuk kenyamanan *debugging* Anda.
 
-### 2. Pilihan Preset Kamera Sinematik Profesional
-Skrip ini dilengkapi dengan **8 preset pergerakan kamera** yang dirancang menggunakan kalkulasi matematika presisi:
-1.  **Orbit**: Kamera berputar secara melingkar mengelilingi target secara dramatis.
-2.  **Epic Pan**: Kamera bergeser secara halus dari sisi ke sisi sambil mengunci fokus pada target.
-3.  **Dynamic Follow**: Kamera melacak pergerakan target dengan jeda (*latency*) yang elastis dan natural.
-4.  **Handheld Shaky**: Mensimulasikan guncangan kamera alami (*organic camera sway*) menggunakan algoritma kebisingan Perlin (*Perlin Noise*).
-5.  **Static Scenic**: Mengunci posisi kamera di satu koordinat estetis statis sambil terus melacak rotasi target.
-6.  **Dolly Zoom (Vertigo Effect)**: Efek optik legendaris bioskop yang mengubah perspektif latar belakang secara dramatis selagi menjaga ukuran subjek tetap proporsional.
-7.  **Crane Shot**: Menyapu sudut pandang secara vertikal dari bawah ke atas layaknya menggunakan katrol derek kamera studio.
-8.  **Side Profile**: Mengunci kamera secara sejajar di samping kanan subjek untuk mengambil cuplikan berjalan atau berlari dari sudut profil.
-
-### 3. Kontrol Kustomisasi & Slider Presisi
-*   **Speed Slider**: Mengontrol kecepatan transisi dan putaran gerakan kamera sinematik (0.1x hingga 5.0x).
-*   **Field of View (FOV) Slider**: Menyesuaikan lebar sudut lensa kamera (10° hingga 120°) secara fleksibel.
-*   **Shake Intensity**: Mengatur kekuatan getaran pada mode *Handheld Shaky* (0.1 hingga 10.0).
-*   **Camera Tilt (Dutch Angle)**: Slider khusus untuk memiringkan kamera secara diagonal pada sumbu *roll* (-30° hingga +30°) untuk komposisi visual yang lebih artistik.
-
-### 4. Fitur Tambahan Tingkat Lanjut
-*   **Velocity FOV Zoom**: Jika aktif, lebar lensa (FOV) akan menyesuaikan secara dinamis dan otomatis berdasarkan kecepatan linear subjek (sangat responsif, bahkan saat karakter sedang mengendarai kendaraan di dalam game).
-*   **Focus Target Lock (Tap-to-Lock)**: Fitur raycast 3D interaktif yang memungkinkan kamera berfokus memutari pemain lain atau NPC di sekitar Anda hanya dengan mengetuk tubuh mereka di layar. Ketuk layar kosong untuk mereset fokus kembali ke diri sendiri.
-*   **Cinematic Lighting (Post-Processing)**: Mengintegrasikan efek pencahayaan profesional langsung ke `game.Lighting` berupa *Depth of Field* (DoF) untuk memburamkan latar belakang secara estetis (*bokeh*), *Bloom* untuk pendaran cahaya, serta *Color Correction* untuk saturasi warna hangat (*warm cinematic tone*).
-
-### 5. Mode Rekam Bersih (*Invisible Record Mode*)
-*   **Clean Screen**: Tombol "Hide Panel" akan menyembunyikan seluruh UI tanpa menyisakan logo atau ikon apa pun yang dapat mengganggu estetika perekaman video.
-*   **Double-Tap Restore**: Untuk memunculkan kembali panel kontrol, pengguna hanya perlu melakukan ketukan ganda (*double-tap/double-click*) pada area sentuh tak terlihat berukuran 120x120 piksel di pojok kanan atas layar.
+### 📌 Repositori Informasi Teknis
+*   **Bahasa Utama**: Luau (Roblox Lua 5.1 Dialect)
+*   **Sistem Animasi UI**: `TweenService` dengan kurva *Easing* Dinamis
+*   **Sistem Update Kamera**: `RunService.RenderStepped` (Sinkronisasi FPS Tinggi)
+*   **Metode Seleksi Target**: *Raycasting 3D* berbasis `UserInputService`
+*   **Integrasi Efek Visual**: Modifikasi dinamis pada instansi objek di `game.Lighting`
 
 ---
 
-## ⚙️ Kompatibilitas & Optimasi Teknis
-*   **Mobile Responsive Design**: Menggunakan kombinasi ukuran relatif (*Scale*) dan *Size Constraint* sehingga antarmuka secara otomatis menyesuaikan ukuran pada layar ponsel terkecil (minimal 280x350px) tanpa memotong tulisan, dan tetap proporsional pada layar PC yang besar.
-*   **Zero Resource Abuse**: Ikon-ikon UI dimuat menggunakan ID Aset digital resmi Roblox (bebas kotak kosong atau kegagalan karakter unicode).
-*   **Clean Cleanup**: Seluruh koneksi `RenderStepped`, penunjuk target, dan instansi efek pencahayaan dijamin hancur (*destroyed*) sepenuhnya saat UI ditutup, mencegah terjadinya penumpukan beban RAM (*memory leak*).
+## 🎬 Panduan Pilihan Preset Gerakan Kamera Sinematik
+
+Tabel di bawah ini memetakan karakteristik teknis dari masing-masing **8 preset kamera** beserta rekomendasi skenario penggunaannya untuk hasil rekaman terbaik:
+
+| Preset Kamera | Karakteristik Teknis | Skenario Penggunaan yang Direkomendasikan |
+| :--- | :--- | :--- |
+| **Orbit** | Berputar melingkar 360° secara kontinu | *Showcase* detail armor, senjata, aksesoris, atau kostum karakter. |
+| **Epic Pan** | Geser horizontal perlahan membentuk parabola | Menyorot pemandangan luas, kota, lanskap alam (*establishing shot*). |
+| **Dynamic Follow** | Pelacakan dinamis dengan latensi elastis | Aksi kejar-kejaran (*action chase*), parkour lari, atau balap mobil. |
+| **Handheld Shaky** | Getaran berbasis *Perlin Noise* (Kebisingan 3D) | Sudut pandang jurnalis, adegan aksi darurat, atau pertempuran intens. |
+| **Static Scenic** | Kamera diam di koordinat tetap sambil melacak target | Adegan menyambut kedatangan subjek dari kejauhan (*reception shot*). |
+| **Dolly Zoom** | Efek Vertigo (Distorsi perspektif latar belakang) | Momen dramatis, ketegangan tinggi, kejutan cerita, atau realisasi plot. |
+| **Crane Shot** | Sapuan vertikal naik/turun secara perlahan | Pengenalan area baru dari sudut pandang tinggi (*high-angle opening*). |
+| **Side Profile** | Meluncur sejajar mengikuti sisi samping subjek | Cuplikan transisi berjalan estetis (*aesthetic slow walking edits*). |
 
 ---
 
-##  Cara Penggunaan
-1.  Salin seluruh kode script Cinematic Camera (V7) ke dalam executor pilihan Anda (misalnya Delta Executor).
-2.  Jalankan skrip. Tunggu loading screen selama 5 detik hingga bar progres mencapai 100%.
-3.  Panel kontrol utama akan terbuka. Sesuaikan gerakan kamera, kecepatan, FOV, pencahayaan, atau target sesuai kebutuhan Anda.
-4.  Tekan **"Hide Panel to Record"** untuk menyembunyikan UI dan memulai proses perekaman layar secara bersih.
-5.  Ketuk **dua kali** secara cepat di pojok kanan paling atas layar untuk mengembalikan panel kontrol.
-6.  Tekan tombol silang **(✕)** pada header untuk menutup skrip dan merestorasi kamera ke keadaan semula.
+## ⚙️ Fitur Pengaturan Tambahan (Post-Processing & Sliders)
+
+```
+[MAIN CONTROL PANEL]
+ ├── Status Mode (Active / Inactive)
+ ├── Movement Style Preset Buttons (8 Styles)
+ ├── Sliders Configuration
+ │    ├── Movement Speed (0.1x - 5.0x)
+ │    ├── Field of View (10° - 120°)
+ │    ├── Shake Intensity (0.1 - 10.0)
+ │    └── Camera Tilt (Dutch Angle: -30° to +30°)
+ ├── Velocity FOV Zoom (Adaptif sesuai Kecepatan Gerak)
+ ├── Cinematic Lighting (Depth of Field, Bloom, & Color Grading)
+ └── Target Selector (Raycast Player/NPC Lock)
+```
+
+*   **Camera Tilt (Dutch Angle)**: Memiringkan horizon kamera secara diagonal untuk menciptakan komposisi visual yang lebih artistik dan tidak kaku.
+*   **Velocity FOV Zoom**: FOV akan membesar secara otomatis seiring bertambahnya kecepatan subjek (bekerja sempurna saat subjek menaiki kendaraan cepat).
+*   **Cinematic Lighting**: Menginjeksikan efek visual profesional secara dinamis (DoF blur latar belakang, saturasi hangat, dan pendaran cahaya) dan membersihkannya secara aman saat dinonaktifkan.
+
+---
+
+## 🎮 Panduan Pintas Cepat (Quick Gestures & Controls)
+
+Gunakan kombinasi gestur interaktif di bawah ini untuk mengontrol UI sinematik Anda secara profesional saat melakukan perekaman layar:
+
+*   **Menyembunyikan UI**: Tekan tombol <kbd>Hide Panel to Record</kbd> untuk menyembunyikan seluruh antarmuka (layar akan menjadi 100% bersih tanpa logo apa pun).
+*   **Menampilkan Kembali UI**: Lakukan <kbd>Double Tap</kbd> (ketukan ganda pada mobile) atau <kbd>Double Click</kbd> (pada PC) di **Pojok Kanan Paling Atas Layar** (Area sentuh tak terlihat berukuran 120x120px).
+*   **Mengunci Target Baru**: Tekan <kbd>Target: Self</kbd> hingga berubah warna menjadi hijau, lalu ketuk subjek pemain lain atau NPC di sekitar Anda.
+*   **Mereset Target**: Tekan tombol target tersebut, lalu ketuk area tanah atau langit yang kosong di layar Anda.
+*   **Menutup Skrip Sepenuhnya**: Klik tombol silang <kbd>✕</kbd> pada bagian kanan atas Header panel.
+
+---
+
+## 🚀 Script Loader
+
+Gunakan *loadstring* di bawah ini untuk mengeksekusi skrip secara instan pada executor Anda:
+
+```lua
+-- Cinematic Camera GUI & System Control (V7)
+-- Fully compatible with Delta Executor (Mobile & PC)
+-- Failsafe error tracking enabled
+
+loadstring(game:HttpGet("https://raw.githubusercontent.com/YourRepo/CinematicV7/main/source.lua"))()
+
+-- (script by hakiraadityaa)
+```
 
 ---
 *(script by hakiraadityaa)*
