@@ -83,7 +83,7 @@ Gunakan *loadstring* di bawah ini untuk mengeksekusi skrip secara instan pada ex
 -- Fully compatible with Delta Executor (Mobile & PC)
 -- Failsafe error tracking enabled
 
-loadstring(game:HttpGet("https://raw.githubusercontent.com/YourRepo/CinematicV7/main/source.lua"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/hakiraadityaa/CINEMATIC-CAMERA-GUI-SYSTEM-CONTROL/refs/heads/main/main.lua"))()
 
 -- (script by hakiraadityaa)
 ```
