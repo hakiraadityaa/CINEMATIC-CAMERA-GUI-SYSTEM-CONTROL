@@ -7,7 +7,11 @@ local cinematicSettings = {
     Tilt = 0,
     VelocityZoom = false,
     PostProcessing = false,
-    Target = nil
+    Letterbox = false,
+    Grid = false,
+    CleanHUD = false,
+    Target = nil,
+    FreecamSpeed = 1.0     -- Drone fly speed scale (0.1x to 3.0x)
 }
 
 -- Modern Styling Theme Colors
@@ -65,6 +69,7 @@ local initSuccess, initError = xpcall(function()
     local RunService = game:GetService("RunService")
     local UserInputService = game:GetService("UserInputService")
     local Lighting = game:GetService("Lighting")
+    local StarterGui = game:GetService("StarterGui")
     
     local localPlayer = Players.LocalPlayer
     local parentUI = nil
@@ -94,7 +99,7 @@ local initSuccess, initError = xpcall(function()
         return obj
     end
 
-    -- Camera States Cache
+    -- Camera & Freecam States Cache
     local originalCameraSubject = nil
     local originalCameraType = nil
     local originalFieldOfView = nil
@@ -102,6 +107,17 @@ local initSuccess, initError = xpcall(function()
     local cameraConnection = nil
     local staticPos = nil
     local activeEffects = {}
+    local hiddenCustomGuis = {}
+
+    -- Freecam Physics Variables
+    local freecamCFrame = CFrame.new()
+    local freecamVelocity = Vector3.new()
+    local freecamPitch = 0
+    local freecamYaw = 0
+    local freecamTargetPitch = 0
+    local freecamTargetYaw = 0
+    local freecamMoveInput = Vector3.new()
+    local mobileMoving = false
 
     local function saveCamera()
         local cam = workspace.CurrentCamera
@@ -162,7 +178,7 @@ local initSuccess, initError = xpcall(function()
         table.insert(activeEffects, cc)
     end
 
-    -- Target Selector Fallback resolver (Supports Player and Character Instance safety)
+    -- Target Selector Fallback resolver
     local function getFocusTarget()
         if cinematicSettings.Target then
             local char = nil
@@ -179,25 +195,44 @@ local initSuccess, initError = xpcall(function()
         return localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
     end
 
-    -- Cerdas Partial Search Algorithm (Mencocokkan awalan & bagian nama secara instan)
+    -- Cerdas Partial Search Algorithm
     local function findTargetByPartialName(name)
         name = name:lower():gsub("%s+", "")
         if name == "" or name == "me" or name == "self" then
             return nil
         end
-        -- Cari kecocokan prefix awal terlebih dahulu
         for _, p in ipairs(Players:GetPlayers()) do
             if p.Name:lower():sub(1, #name) == name or p.DisplayName:lower():sub(1, #name) == name then
                 return p
             end
         end
-        -- Cari kecocokan substring acak
         for _, p in ipairs(Players:GetPlayers()) do
             if p.Name:lower():find(name, 1, true) or p.DisplayName:lower():find(name, 1, true) then
                 return p
             end
         end
         return nil
+    end
+
+    -- Keyboard Movement Inputs (PC Compatibility)
+    local function updateKeyboardInput()
+        if not cinematicSettings.Active or cinematicSettings.CurrentStyle ~= "Freecam" then return end
+        
+        -- Ignore typing input if active
+        if UserInputService:GetFocusedTextBox() then return end
+        
+        local x, y, z = 0, 0, 0
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then z = -1 end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then z = 1 end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then x = -1 end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then x = 1 end
+        if UserInputService:IsKeyDown(Enum.KeyCode.E) or UserInputService:IsKeyDown(Enum.KeyCode.Space) then y = 1 end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Q) or UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then y = -1 end
+        
+        -- Override if virtual mobile joystick is inactive
+        if not mobileMoving then
+            freecamMoveInput = Vector3.new(x, y, z)
+        end
     end
 
     local function stopCinematic()
@@ -214,17 +249,57 @@ local initSuccess, initError = xpcall(function()
         saveCamera()
         applyCinematicEffects()
         
-        workspace.CurrentCamera.CameraType = Enum.CameraType.Scriptable
-        local angle = 0
+        local cam = workspace.CurrentCamera
+        cam.CameraType = Enum.CameraType.Scriptable
         
+        -- Inisialisasi posisi dan orientasi tanpa snapping jika memilih Freecam
+        if cinematicSettings.CurrentStyle == "Freecam" then
+            freecamCFrame = cam.CFrame
+            local rx, ry, rz = freecamCFrame:ToOrientation()
+            freecamPitch = math.clamp(math.degrees(rx), -85, 85)
+            freecamYaw = math.degrees(ry)
+            freecamTargetPitch = freecamPitch
+            freecamTargetYaw = freecamYaw
+            freecamVelocity = Vector3.new()
+            freecamMoveInput = Vector3.new()
+        end
+        
+        local angle = 0
         cameraConnection = RunService.RenderStepped:Connect(function(dt)
-            local cam = workspace.CurrentCamera
             local hrp = getFocusTarget()
-            if not hrp then return end
             
+            -- Freecam Mode Update Logic (v11.0.0 Feature)
+            if cinematicSettings.CurrentStyle == "Freecam" then
+                updateKeyboardInput()
+                
+                -- Smooth Angular Momentum interpolations
+                freecamPitch = freecamPitch + (freecamTargetPitch - freecamPitch) * 0.15
+                freecamYaw = freecamYaw + (freecamTargetYaw - freecamYaw) * 0.15
+                freecamPitch = math.clamp(freecamPitch, -85, 85)
+                
+                local rotationCF = CFrame.Angles(0, math.rad(freecamYaw), 0) * CFrame.Angles(math.rad(freecamPitch), 0, 0)
+                
+                -- Translate direction inputs to current local camera coordinates
+                local localMove = Vector3.new(freecamMoveInput.X, 0, freecamMoveInput.Z)
+                local moveDir = rotationCF:VectorToWorldSpace(localMove)
+                moveDir = moveDir + Vector3.new(0, freecamMoveInput.Y, 0) -- Vertical Ascend/Descend
+                
+                -- Velocity interpolation with Momentum/Friction damping
+                local targetVelocity = moveDir * (25 * cinematicSettings.FreecamSpeed)
+                freecamVelocity = freecamVelocity:Lerp(targetVelocity, 0.12)
+                
+                freecamCFrame = CFrame.new(freecamCFrame.Position + (freecamVelocity * dt)) * rotationCF
+                cam.CFrame = freecamCFrame
+                
+                -- Field of view update safely
+                cam.FieldOfView = cam.FieldOfView + (cinematicSettings.FOV - cam.FieldOfView) * 0.1
+                return
+            end
+            
+            -- Fallback safeguard for other camera presets
+            if not hrp then return end
             angle = angle + dt * (cinematicSettings.Speed * 0.4)
             
-            -- Camera Style Positioning Calculations
             if cinematicSettings.CurrentStyle == "Orbit" then
                 local offset = Vector3.new(math.cos(angle) * 22, 5, math.sin(angle) * 22)
                 local targetPos = hrp.Position + Vector3.new(0, 1.5, 0)
@@ -281,7 +356,6 @@ local initSuccess, initError = xpcall(function()
                 cam.CFrame = cam.CFrame:Lerp(targetCF, 0.08)
 
             elseif cinematicSettings.CurrentStyle == "Bodycam" then
-                -- Immersive GoPro Chest / Bodycam Mount Style (New v9.0.0 Feature)
                 local char = hrp.Parent
                 local humanoid = char and char:FindFirstChildOfClass("Humanoid")
                 local isMoving = hrp.AssemblyLinearVelocity.Magnitude > 2
@@ -290,25 +364,18 @@ local initSuccess, initError = xpcall(function()
                 local speed = (humanoid and humanoid.WalkSpeed) or 16
                 
                 if isMoving then
-                    -- Tactical walk/run bobbing
                     local t = tick() * (speed * 0.75 * cinematicSettings.Speed)
                     bobY = math.sin(t) * 0.18 * cinematicSettings.ShakeIntensity
                     bobX = math.cos(t * 0.5) * 0.1 * cinematicSettings.ShakeIntensity
                 else
-                    -- Smooth breathing sway while standing still
                     local t = tick() * (2 * cinematicSettings.Speed)
                     bobY = math.sin(t) * 0.04
                     bobX = math.cos(t * 0.5) * 0.02
                 end
                 
-                -- Positioning camera slightly below the head, slightly forward
-                local bodycamOffset = Vector3.new(0, 1.4, 0.6) -- 1.4 studs up, 0.6 studs forward
+                local bodycamOffset = Vector3.new(0, 1.4, 0.6)
                 local chestPos = hrp.Position + hrp.CFrame.LookVector * bodycamOffset.Z + Vector3.new(0, bodycamOffset.Y, 0)
-                
-                -- Apply the bobbing offset locally using RightVector and UpVector
                 local finalPos = chestPos + (hrp.CFrame.RightVector * bobX) + (Vector3.new(0, bobY, 0))
-                
-                -- Looking ahead of the chest movement
                 local targetLook = hrp.Position + hrp.CFrame.LookVector * 20 + Vector3.new(0, 1.4, 0)
                 
                 local targetCF = CFrame.new(finalPos, targetLook)
@@ -340,6 +407,20 @@ local initSuccess, initError = xpcall(function()
         end)
     end
 
+    -- Mouse Right-Click to Drag Look on PC
+    safeConnect(UserInputService.InputChanged, function(input, processed)
+        if processed then return end
+        if cinematicSettings.Active and cinematicSettings.CurrentStyle == "Freecam" then
+            if input.UserInputType == Enum.UserInputType.MouseMovement then
+                if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) or MainFrame.Visible == false then
+                    local sensitivity = 0.15
+                    freecamTargetYaw = freecamTargetYaw - (input.Delta.X * sensitivity)
+                    freecamTargetPitch = freecamTargetPitch - (input.Delta.Y * sensitivity)
+                end
+            end
+        end
+    end)
+
     -- Character Re-spawn Safeguard
     safeConnect(localPlayer.CharacterAdded, function(newChar)
         if cinematicSettings.Active then
@@ -348,7 +429,7 @@ local initSuccess, initError = xpcall(function()
         end
     end)
 
-    -- Player Leaving Safeguard (Mencegah tumpukan memori atau crash jika target keluar game)
+    -- Player Leaving Safeguard
     safeConnect(Players.PlayerRemoving, function(player)
         if cinematicSettings.Target and (cinematicSettings.Target == player or cinematicSettings.Target == player.Character) then
             cinematicSettings.Target = nil
@@ -362,7 +443,7 @@ local initSuccess, initError = xpcall(function()
         end
     end)
 
-    -- Build Base ScreenGui (IgnoreGuiInset ensures proper full coverage)
+    -- Build Base ScreenGui
     local ScreenGui = create("ScreenGui", {
         Name = "CinematicGUI_Hakira",
         ResetOnSpawn = false,
@@ -752,7 +833,7 @@ local initSuccess, initError = xpcall(function()
         TweenService:Create(ToggleBtn, TweenInfo.new(0.2), { BackgroundColor3 = targetColor }):Play()
     end)
 
-    -- 2. Style Selection Control Card (Expanded Presets in v9.0.0)
+    -- 2. Style Selection Control Card
     local StylesCard = create("Frame", {
         Name = "StylesCard",
         Size = UDim2.new(0.92, 0, 0, 105),
@@ -794,8 +875,8 @@ local initSuccess, initError = xpcall(function()
         Padding = UDim.new(0, 8)
     })
 
-    -- Added GoPro Bodycam Preset
-    local styles = {"Orbit", "Epic Pan", "Dynamic Follow", "Handheld Shaky", "Static Scenic", "Dolly Zoom", "Crane Shot", "Side Profile", "Bodycam"}
+    -- Styles list containing "Freecam" Style #10 (v11.0.0 Feature)
+    local styles = {"Orbit", "Epic Pan", "Dynamic Follow", "Handheld Shaky", "Static Scenic", "Dolly Zoom", "Crane Shot", "Side Profile", "Bodycam", "Freecam"}
     local styleButtons = {}
 
     local function selectStyle(styleName)
@@ -1107,7 +1188,7 @@ local initSuccess, initError = xpcall(function()
     }, ScrollFrame)
     create("UICorner", { CornerRadius = UDim.new(0, 12) }, TargetCard)
 
-    create("TextLabel", {
+    local TargetTitle = create("TextLabel", {
         Name = "Title",
         Size = UDim2.new(0.55, 0, 0.4, 0),
         Position = UDim2.new(0.05, 0, 0.15, 0),
@@ -1119,7 +1200,7 @@ local initSuccess, initError = xpcall(function()
         TextXAlignment = Enum.TextXAlignment.Left
     }, TargetCard)
 
-    create("TextLabel", {
+    local TargetSubtitle = create("TextLabel", {
         Name = "Subtitle",
         Size = UDim2.new(0.55, 0, 0.3, 0),
         Position = UDim2.new(0.05, 0, 0.55, 0),
@@ -1131,7 +1212,7 @@ local initSuccess, initError = xpcall(function()
         TextXAlignment = Enum.TextXAlignment.Left
     }, TargetCard)
 
-    -- Target TextBox (Mencocokkan nama dan display name)
+    -- Target TextBox
     local TargetTextBox = create("TextBox", {
         Name = "TargetTextBox",
         Size = UDim2.new(0.35, 0, 0.6, 0),
@@ -1188,13 +1269,668 @@ local initSuccess, initError = xpcall(function()
         end
     end)
 
-    -- 5. Hide Control Card (Cinematic View - LayoutOrder 10)
+    -- =========================================================================
+    -- OVERLAYS: CINEMASCOPE, GRID, & HUD HIDER
+    -- =========================================================================
+
+    -- Cinematic Letterbox Bars
+    local TopBar = create("Frame", {
+        Name = "TopBar",
+        Size = UDim2.new(1, 0, 0, 0),
+        Position = UDim2.new(0, 0, 0, 0),
+        BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+        BorderSizePixel = 0,
+        ZIndex = 49,
+        Visible = false
+    }, ScreenGui)
+    
+    local BottomBar = create("Frame", {
+        Name = "BottomBar",
+        Size = UDim2.new(1, 0, 0, 0),
+        Position = UDim2.new(0, 0, 1, 0),
+        AnchorPoint = Vector2.new(0, 1),
+        BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+        BorderSizePixel = 0,
+        ZIndex = 49,
+        Visible = false
+    }, ScreenGui)
+
+    -- Rule of Thirds Grid Overlay Frame
+    local GridFrame = create("Frame", {
+        Name = "GridFrame",
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 48,
+        Visible = false
+    }, ScreenGui)
+    
+    create("Frame", { Size = UDim2.new(0, 1, 1, 0), Position = UDim2.new(0.333, 0, 0, 0), BackgroundColor3 = Color3.fromRGB(255, 255, 255), BackgroundTransparency = 0.7, BorderSizePixel = 0 }, GridFrame)
+    create("Frame", { Size = UDim2.new(0, 1, 1, 0), Position = UDim2.new(0.666, 0, 0, 0), BackgroundColor3 = Color3.fromRGB(255, 255, 255), BackgroundTransparency = 0.7, BorderSizePixel = 0 }, GridFrame)
+    create("Frame", { Size = UDim2.new(1, 0, 0, 1), Position = UDim2.new(0, 0, 0.333, 0), BackgroundColor3 = Color3.fromRGB(255, 255, 255), BackgroundTransparency = 0.7, BorderSizePixel = 0 }, GridFrame)
+    create("Frame", { Size = UDim2.new(1, 0, 0, 1), Position = UDim2.new(0, 0, 0.666, 0), BackgroundColor3 = Color3.fromRGB(255, 255, 255), BackgroundTransparency = 0.7, BorderSizePixel = 0 }, GridFrame)
+
+    -- Cinematic Letterbox Animation Toggle Card (LayoutOrder 11)
+    local LetterboxCard = create("Frame", {
+        Name = "LetterboxCard",
+        Size = UDim2.new(0.92, 0, 0, 50),
+        BackgroundColor3 = COLOR_HEADER,
+        BorderSizePixel = 0,
+        LayoutOrder = 11
+    }, ScrollFrame)
+    create("UICorner", { CornerRadius = UDim.new(0, 12) }, LetterboxCard)
+
+    create("TextLabel", { Name = "Title", Size = UDim2.new(0.6, 0, 0.4, 0), Position = UDim2.new(0.05, 0, 0.15, 0), BackgroundTransparency = 1, Text = "Cinematic Letterbox (21:9)", TextColor3 = COLOR_TEXT, Font = FontFace, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left }, LetterboxCard)
+    create("TextLabel", { Name = "Subtitle", Size = UDim2.new(0.6, 0, 0.3, 0), Position = UDim2.new(0.05, 0, 0.55, 0), BackgroundTransparency = 1, Text = "Enables smooth Cinemascope movie bars", TextColor3 = COLOR_TEXT_MUTED, Font = FontFaceMedium, TextSize = 9, TextXAlignment = Enum.TextXAlignment.Left }, LetterboxCard)
+
+    local LetToggleBtn = create("TextButton", { Name = "LetToggleBtn", Size = UDim2.new(0.25, 0, 0.6, 0), Position = UDim2.new(0.7, 0, 0.2, 0), BackgroundColor3 = COLOR_RED, Text = "OFF", TextColor3 = COLOR_TEXT, Font = FontFace, TextSize = 10, BorderSizePixel = 0 }, LetterboxCard)
+    create("UICorner", { CornerRadius = UDim.new(0, 8) }, LetToggleBtn)
+
+    local function setLetterboxState(state)
+        cinematicSettings.Letterbox = state
+        if state then
+            LetToggleBtn.Text = "ON"
+            TweenService:Create(LetToggleBtn, TweenInfo.new(0.25), { BackgroundColor3 = COLOR_GREEN }):Play()
+            TopBar.Visible = true
+            BottomBar.Visible = true
+            TweenService:Create(TopBar, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(1, 0, 0.12, 0) }):Play()
+            TweenService:Create(BottomBar, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = UDim2.new(1, 0, 0.12, 0) }):Play()
+        else
+            LetToggleBtn.Text = "OFF"
+            TweenService:Create(LetToggleBtn, TweenInfo.new(0.25), { BackgroundColor3 = COLOR_RED }):Play()
+            local t1 = TweenService:Create(TopBar, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Size = UDim2.new(1, 0, 0, 0) })
+            local t2 = TweenService:Create(BottomBar, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Size = UDim2.new(1, 0, 0, 0) })
+            t1:Play()
+            t2:Play()
+            task.spawn(function()
+                t1.Completed:Wait()
+                if not cinematicSettings.Letterbox then
+                    TopBar.Visible = false
+                    BottomBar.Visible = false
+                end
+            end)
+        end
+    end
+
+    safeConnect(LetToggleBtn.MouseButton1Click, function()
+        setLetterboxState(not cinematicSettings.Letterbox)
+    end)
+
+    -- Rule of Thirds Grid Toggle Card (LayoutOrder 12)
+    local GridCard = create("Frame", {
+        Name = "GridCard",
+        Size = UDim2.new(0.92, 0, 0, 50),
+        BackgroundColor3 = COLOR_HEADER,
+        BorderSizePixel = 0,
+        LayoutOrder = 12
+    }, ScrollFrame)
+    create("UICorner", { CornerRadius = UDim.new(0, 12) }, GridCard)
+
+    create("TextLabel", { Name = "Title", Size = UDim2.new(0.6, 0, 0.4, 0), Position = UDim2.new(0.05, 0, 0.15, 0), BackgroundTransparency = 1, Text = "Rule of Thirds Grid", TextColor3 = COLOR_TEXT, Font = FontFace, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left }, GridCard)
+    create("TextLabel", { Name = "Subtitle", Size = UDim2.new(0.6, 0, 0.3, 0), Position = UDim2.new(0.05, 0, 0.55, 0), BackgroundTransparency = 1, Text = "Displays 3x3 helper framing grid", TextColor3 = COLOR_TEXT_MUTED, Font = FontFaceMedium, TextSize = 9, TextXAlignment = Enum.TextXAlignment.Left }, GridCard)
+
+    local GridToggleBtn = create("TextButton", { Name = "GridToggleBtn", Size = UDim2.new(0.25, 0, 0.6, 0), Position = UDim2.new(0.7, 0, 0.2, 0), BackgroundColor3 = COLOR_RED, Text = "OFF", TextColor3 = COLOR_TEXT, Font = FontFace, TextSize = 10, BorderSizePixel = 0 }, GridCard)
+    create("UICorner", { CornerRadius = UDim.new(0, 8) }, GridToggleBtn)
+
+    local function setGridState(state)
+        cinematicSettings.Grid = state
+        if state then
+            GridToggleBtn.Text = "ON"
+            TweenService:Create(GridToggleBtn, TweenInfo.new(0.25), { BackgroundColor3 = COLOR_GREEN }):Play()
+            GridFrame.Visible = true
+        else
+            GridToggleBtn.Text = "OFF"
+            TweenService:Create(GridToggleBtn, TweenInfo.new(0.25), { BackgroundColor3 = COLOR_RED }):Play()
+            GridFrame.Visible = false
+        end
+    end
+
+    safeConnect(GridToggleBtn.MouseButton1Click, function()
+        setGridState(not cinematicSettings.Grid)
+    end)
+
+    -- Clean HUD Toggle Card (StarterGui & Custom Game UI Hider - LayoutOrder 13)
+    local HUDCard = create("Frame", {
+        Name = "HUDCard",
+        Size = UDim2.new(0.92, 0, 0, 50),
+        BackgroundColor3 = COLOR_HEADER,
+        BorderSizePixel = 0,
+        LayoutOrder = 13
+    }, ScrollFrame)
+    create("UICorner", { CornerRadius = UDim.new(0, 12) }, HUDCard)
+
+    create("TextLabel", { Name = "Title", Size = UDim2.new(0.6, 0, 0.4, 0), Position = UDim2.new(0.05, 0, 0.15, 0), BackgroundTransparency = 1, Text = "Clean HUD Mode", TextColor3 = COLOR_TEXT, Font = FontFace, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Left }, HUDCard)
+    create("TextLabel", { Name = "Subtitle", Size = UDim2.new(0.6, 0, 0.3, 0), Position = UDim2.new(0.05, 0, 0.55, 0), BackgroundTransparency = 1, Text = "Hides all core and custom game GUIs", TextColor3 = COLOR_TEXT_MUTED, Font = FontFaceMedium, TextSize = 9, TextXAlignment = Enum.TextXAlignment.Left }, HUDCard)
+
+    local HUDToggleBtn = create("TextButton", { Name = "HUDToggleBtn", Size = UDim2.new(0.25, 0, 0.6, 0), Position = UDim2.new(0.7, 0, 0.2, 0), BackgroundColor3 = COLOR_RED, Text = "OFF", TextColor3 = COLOR_TEXT, Font = FontFace, TextSize = 10, BorderSizePixel = 0 }, HUDCard)
+    create("UICorner", { CornerRadius = UDim.new(0, 8) }, HUDToggleBtn)
+
+    local function setCleanHUDState(state)
+        cinematicSettings.CleanHUD = state
+        if state then
+            HUDToggleBtn.Text = "ON"
+            TweenService:Create(HUDToggleBtn, TweenInfo.new(0.25), { BackgroundColor3 = COLOR_GREEN }):Play()
+            pcall(function() StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, false) end)
+            
+            local playerGui = localPlayer:FindFirstChildOfClass("PlayerGui")
+            if playerGui then
+                hiddenCustomGuis = {}
+                for _, gui in ipairs(playerGui:GetChildren()) do
+                    if gui:IsA("ScreenGui") and gui.Enabled == true and gui ~= ScreenGui then
+                        table.insert(hiddenCustomGuis, gui)
+                        pcall(function() gui.Enabled = false end)
+                    end
+                end
+            end
+        else
+            HUDToggleBtn.Text = "OFF"
+            TweenService:Create(HUDToggleBtn, TweenInfo.new(0.25), { BackgroundColor3 = COLOR_RED }):Play()
+            pcall(function() StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, true) end)
+            
+            for _, gui in ipairs(hiddenCustomGuis) do
+                if gui and gui.Parent then
+                    pcall(function() gui.Enabled = true end)
+                end
+            end
+            hiddenCustomGuis = {}
+        end
+    end
+
+    safeConnect(HUDToggleBtn.MouseButton1Click, function()
+        setCleanHUDState(not cinematicSettings.CleanHUD)
+    end)
+
+    -- =========================================================================
+    -- NEW HIGH-END UX ADDITIONS: TRANSPARENT VERTICAL FOV / ELEVATION SLIDER
+    -- =========================================================================
+    local FovSliderFrame = create("Frame", {
+        Name = "FovSliderFrame",
+        Size = UDim2.new(0, 20, 0, 0), -- Starts collapsed
+        Position = UDim2.new(1, -25, 0.5, 0),
+        AnchorPoint = Vector2.new(1, 0.5),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 60,
+        Visible = false
+    }, ScreenGui)
+
+    local FovSliderTrack = create("Frame", {
+        Name = "Track",
+        Size = UDim2.new(0, 4, 1, 0),
+        Position = UDim2.new(0.5, 0, 0, 0),
+        AnchorPoint = Vector2.new(0.5, 0),
+        BackgroundColor3 = COLOR_ACCENT,
+        BackgroundTransparency = 0.85,
+        BorderSizePixel = 0
+    }, FovSliderFrame)
+    create("UICorner", { CornerRadius = UDim.new(0, 2) }, FovSliderTrack)
+
+    local FovProgress = create("Frame", {
+        Name = "Progress",
+        Size = UDim2.new(1, 0, 0, 0),
+        Position = UDim2.new(0, 0, 1, 0),
+        AnchorPoint = Vector2.new(0, 1),
+        BackgroundColor3 = COLOR_ACCENT,
+        BackgroundTransparency = 0.5,
+        BorderSizePixel = 0
+    }, FovSliderTrack)
+    create("UICorner", { CornerRadius = UDim.new(0, 2) }, FovProgress)
+
+    local FovKnob = create("Frame", {
+        Name = "Knob",
+        Size = UDim2.new(0, 14, 0, 14),
+        Position = UDim2.new(0.5, 0, 1, 0),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = COLOR_TEXT,
+        BackgroundTransparency = 0.4,
+        BorderSizePixel = 0
+    }, FovSliderTrack)
+    create("UICorner", { CornerRadius = UDim.new(0, 7) }, FovKnob)
+    create("UIStroke", { Color = COLOR_ACCENT, Thickness = 1.2, Transparency = 0.3 }, FovKnob)
+
+    local FovLabel = create("TextLabel", {
+        Name = "FovLabel",
+        Size = UDim2.new(0, 40, 0, 15),
+        Position = UDim2.new(-1, -6, 0.5, 0),
+        AnchorPoint = Vector2.new(1, 0.5),
+        BackgroundTransparency = 1,
+        Text = "70°",
+        TextColor3 = COLOR_TEXT,
+        TextTransparency = 0.5,
+        Font = FontFace,
+        TextSize = 10,
+        TextXAlignment = Enum.TextXAlignment.Right
+    }, FovKnob)
+
+    -- Dynamic Vertical Slider Drag Handler (Dual Mode: FOV / Freecam Elevation)
+    local fovDragging = false
+    local function updateVerticalSlider(input)
+        local posY = input.Position.Y
+        local trackPosY = FovSliderTrack.AbsolutePosition.Y
+        local trackHeight = FovSliderTrack.AbsoluteSize.Y
+        local percentage = 1 - math.clamp((posY - trackPosY) / trackHeight, 0, 1)
+        
+        if cinematicSettings.CurrentStyle == "Freecam" then
+            -- Elevation Flight Joystick Mode (Relative to center spring 0.5)
+            local offsetFromCenter = percentage - 0.5 -- range -0.5 to 0.5
+            FovKnob.Position = UDim2.new(0.5, 0, 1 - percentage, 0)
+            FovProgress.Size = UDim2.new(1, 0, percentage, 0)
+            
+            local vertInput = offsetFromCenter * 2.0 -- scale -1.0 to 1.0
+            freecamMoveInput = Vector3.new(freecamMoveInput.X, vertInput, freecamMoveInput.Z)
+            FovLabel.Text = vertInput > 0.15 and "▲" or (vertInput < -0.15 and "▼" or "•")
+        else
+            -- Standard FOV adjustments
+            FovKnob.Position = UDim2.new(0.5, 0, 1 - percentage, 0)
+            FovProgress.Size = UDim2.new(1, 0, percentage, 0)
+            
+            local targetFov = math.round(10 + (120 - 10) * percentage)
+            cinematicSettings.FOV = targetFov
+            FovLabel.Text = tostring(targetFov) .. "°"
+        end
+    end
+
+    safeConnect(FovKnob.InputBegan, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            fovDragging = true
+            TweenService:Create(FovKnob, TweenInfo.new(0.2), { BackgroundTransparency = 0.1 }):Play()
+            TweenService:Create(FovLabel, TweenInfo.new(0.2), { TextTransparency = 0.1 }):Play()
+        end
+    end)
+
+    safeConnect(UserInputService.InputChanged, function(input)
+        if fovDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            updateVerticalSlider(input)
+        end
+    end)
+
+    safeConnect(UserInputService.InputEnded, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            fovDragging = false
+            TweenService:Create(FovKnob, TweenInfo.new(0.2), { BackgroundTransparency = 0.4 }):Play()
+            TweenService:Create(FovLabel, TweenInfo.new(0.2), { TextTransparency = 0.5 }):Play()
+            
+            -- Spring-back mechanical effect specifically for Elevation Flight Joystick
+            if cinematicSettings.CurrentStyle == "Freecam" then
+                TweenService:Create(FovKnob, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                    Position = UDim2.new(0.5, 0, 0.5, 0)
+                }):Play()
+                TweenService:Create(FovProgress, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                    Size = UDim2.new(1, 0, 0.5, 0)
+                }):Play()
+                freecamMoveInput = Vector3.new(freecamMoveInput.X, 0, freecamMoveInput.Z)
+                FovLabel.Text = "↕"
+            end
+        end
+    end)
+
+    -- =========================================================================
+    -- NEW MOBILE-ONLY FREECAM CONTROLS (MOVEPAD, ROTATEPAD, JOYSTICK)
+    -- =========================================================================
+    local FreecamControls = create("Frame", {
+        Name = "FreecamControls",
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 58,
+        Visible = false
+    }, ScreenGui)
+
+    -- Left Touch Pad for movement joystick activation
+    local LeftMovePad = create("Frame", {
+        Name = "LeftMovePad",
+        Size = UDim2.new(0.45, 0, 0.8, 0),
+        Position = UDim2.new(0, 0, 0.15, 0),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 59
+    }, FreecamControls)
+
+    -- Right Touch Pad for panning camera rotation yaw/pitch
+    local RightRotatePad = create("Frame", {
+        Name = "RightRotatePad",
+        Size = UDim2.new(0.45, 0, 0.8, 0),
+        Position = UDim2.new(0.5, 0, 0.15, 0),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 59
+    }, FreecamControls)
+
+    -- Neon Virtual Joystick
+    local JoyRing = create("Frame", {
+        Name = "JoyRing",
+        Size = UDim2.new(0, 70, 0, 70),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = COLOR_ACCENT,
+        BackgroundTransparency = 0.8,
+        BorderSizePixel = 0,
+        ZIndex = 60,
+        Visible = false
+    }, ScreenGui)
+    create("UICorner", { CornerRadius = UDim.new(0, 35) }, JoyRing)
+    create("UIStroke", { Color = COLOR_ACCENT, Thickness = 1.5, Transparency = 0.4 }, JoyRing)
+
+    local JoyKnob = create("Frame", {
+        Name = "JoyKnob",
+        Size = UDim2.new(0, 30, 0, 30),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        BackgroundColor3 = COLOR_TEXT,
+        BackgroundTransparency = 0.4,
+        BorderSizePixel = 0,
+        ZIndex = 61
+    }, JoyRing)
+    create("UICorner", { CornerRadius = UDim.new(0, 15) }, JoyKnob)
+
+    -- Left Flight Speed Slider (Specifically for Drone velocity tuning)
+    local SpeedSliderFrame = create("Frame", {
+        Name = "SpeedSliderFrame",
+        Size = UDim2.new(0, 20, 0, 0), -- Starts collapsed
+        Position = UDim2.new(0, 25, 0.5, 0),
+        AnchorPoint = Vector2.new(0, 0.5),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 60,
+        Visible = false
+    }, ScreenGui)
+
+    local SpeedTrack = create("Frame", {
+        Name = "Track",
+        Size = UDim2.new(0, 4, 1, 0),
+        Position = UDim2.new(0.5, 0, 0, 0),
+        AnchorPoint = Vector2.new(0.5, 0),
+        BackgroundColor3 = COLOR_ACCENT,
+        BackgroundTransparency = 0.85,
+        BorderSizePixel = 0
+    }, SpeedSliderFrame)
+    create("UICorner", { CornerRadius = UDim.new(0, 2) }, SpeedTrack)
+
+    local SpeedProgress = create("Frame", {
+        Name = "Progress",
+        Size = UDim2.new(1, 0, 0, 0),
+        Position = UDim2.new(0, 0, 1, 0),
+        AnchorPoint = Vector2.new(0, 1),
+        BackgroundColor3 = COLOR_ACCENT,
+        BackgroundTransparency = 0.5,
+        BorderSizePixel = 0
+    }, SpeedTrack)
+    create("UICorner", { CornerRadius = UDim.new(0, 2) }, SpeedProgress)
+
+    local SpeedKnob = create("Frame", {
+        Name = "Knob",
+        Size = UDim2.new(0, 14, 0, 14),
+        Position = UDim2.new(0.5, 0, 1, 0),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = COLOR_TEXT,
+        BackgroundTransparency = 0.4,
+        BorderSizePixel = 0
+    }, SpeedTrack)
+    create("UICorner", { CornerRadius = UDim.new(0, 7) }, SpeedKnob)
+    create("UIStroke", { Color = COLOR_ACCENT, Thickness = 1.2, Transparency = 0.3 }, SpeedKnob)
+
+    local SpeedLabel = create("TextLabel", {
+        Name = "SpeedLabel",
+        Size = UDim2.new(0, 40, 0, 15),
+        Position = UDim2.new(2, 6, 0.5, 0),
+        AnchorPoint = Vector2.new(0, 0.5),
+        BackgroundTransparency = 1,
+        Text = "1.0x",
+        TextColor3 = COLOR_TEXT,
+        TextTransparency = 0.5,
+        Font = FontFace,
+        TextSize = 10,
+        TextXAlignment = Enum.TextXAlignment.Left
+    }, SpeedKnob)
+
+    -- Left Flight Speed Slider Drag Handler
+    local speedDragging = false
+    local function updateFlightSpeed(input)
+        local posY = input.Position.Y
+        local trackPosY = SpeedTrack.AbsolutePosition.Y
+        local trackHeight = SpeedTrack.AbsoluteSize.Y
+        local percentage = 1 - math.clamp((posY - trackPosY) / trackHeight, 0, 1)
+        
+        SpeedKnob.Position = UDim2.new(0.5, 0, 1 - percentage, 0)
+        SpeedProgress.Size = UDim2.new(1, 0, percentage, 0)
+        
+        -- Map speed from 0.1x crawl speed to 3.0x high flyby speed
+        local speedScale = math.round((0.1 + (3.0 - 0.1) * percentage) * 10) / 10
+        cinematicSettings.FreecamSpeed = speedScale
+        SpeedLabel.Text = tostring(speedScale) .. "x"
+    end
+
+    safeConnect(SpeedKnob.InputBegan, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            speedDragging = true
+            TweenService:Create(SpeedKnob, TweenInfo.new(0.2), { BackgroundTransparency = 0.1 }):Play()
+            TweenService:Create(SpeedLabel, TweenInfo.new(0.2), { TextTransparency = 0.1 }):Play()
+        end
+    end)
+
+    safeConnect(UserInputService.InputChanged, function(input)
+        if speedDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            updateFlightSpeed(input)
+        end
+    end)
+
+    safeConnect(UserInputService.InputEnded, function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            speedDragging = false
+            TweenService:Create(SpeedKnob, TweenInfo.new(0.2), { BackgroundTransparency = 0.4 }):Play()
+            TweenService:Create(SpeedLabel, TweenInfo.new(0.2), { TextTransparency = 0.5 }):Play()
+        end
+    end)
+
+    -- Left Mobile Move Touchpad Gesture (Joystick Calculations)
+    local moveTouchStart = nil
+    safeConnect(LeftMovePad.InputBegan, function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            mobileMoving = true
+            local touchPos = input.Position
+            moveTouchStart = touchPos
+            
+            JoyRing.Position = UDim2.new(0, touchPos.X, 0, touchPos.Y)
+            JoyKnob.Position = UDim2.new(0.5, 0, 0.5, 0)
+            JoyRing.Visible = true
+            
+            local dragConnection
+            dragConnection = safeConnect(UserInputService.InputChanged, function(dragInput)
+                if mobileMoving and (dragInput.UserInputType == Enum.UserInputType.Touch or dragInput.UserInputType == Enum.UserInputType.MouseMovement) then
+                    local delta = dragInput.Position - moveTouchStart
+                    local dist = delta.Magnitude
+                    local dir = dist > 0.1 and delta.Unit or Vector3.new()
+                    
+                    local maxRadius = 35
+                    JoyKnob.Position = UDim2.new(0.5, dir.X * math.min(dist, maxRadius), 0.5, dir.Y * math.min(dist, maxRadius))
+                    
+                    -- Screen Y vector points down, map directly to standard -Z forward, +Z back movement
+                    freecamMoveInput = Vector3.new(dir.X, freecamMoveInput.Y, dir.Y)
+                end
+            end)
+            
+            local endConnection
+            endConnection = safeConnect(input.Changed, function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    mobileMoving = false
+                    JoyRing.Visible = false
+                    freecamMoveInput = Vector3.new(0, freecamMoveInput.Y, 0)
+                    dragConnection:Disconnect()
+                    endConnection:Disconnect()
+                end
+            end)
+        end
+    end)
+
+    -- Right Mobile Rotate Touchpad Gesture (Look Around Calculations)
+    local rotateTouchLast = nil
+    local rotatingActive = false
+    safeConnect(RightRotatePad.InputBegan, function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            rotatingActive = true
+            rotateTouchLast = input.Position
+            
+            local rotateConnection
+            rotateConnection = safeConnect(UserInputService.InputChanged, function(dragInput)
+                if rotatingActive and (dragInput.UserInputType == Enum.UserInputType.Touch or dragInput.UserInputType == Enum.UserInputType.MouseMovement) then
+                    local currentPos = dragInput.Position
+                    local delta = currentPos - rotateTouchLast
+                    rotateTouchLast = currentPos
+                    
+                    local sensitivity = 0.25
+                    freecamTargetYaw = freecamTargetYaw - (delta.X * sensitivity)
+                    freecamTargetPitch = freecamTargetPitch - (delta.Y * sensitivity)
+                end
+            end)
+            
+            local endConnection
+            endConnection = safeConnect(input.Changed, function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    rotatingActive = false
+                    rotateConnection:Disconnect()
+                    endConnection:Disconnect()
+                end
+            end)
+        end
+    end)
+
+    -- =========================================================================
+    -- NEW HIGH-END UX ADDITIONS: CLOSE SCRIPT CONFIRMATION DIALOG MODAL
+    -- =========================================================================
+    local ConfirmOverlay = create("Frame", {
+        Name = "ConfirmOverlay",
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundColor3 = Color3.fromRGB(10, 10, 14),
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        ZIndex = 110,
+        Visible = false
+    }, ScreenGui)
+
+    local ConfirmCard = create("Frame", {
+        Name = "ConfirmCard",
+        Size = UDim2.new(0, 0, 0, 0),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = COLOR_HEADER,
+        BorderSizePixel = 0,
+        ClipsDescendants = true,
+        ZIndex = 111
+    }, ConfirmOverlay)
+    create("UICorner", { CornerRadius = UDim.new(0, 14) }, ConfirmCard)
+    local ConfirmStroke = create("UIStroke", { Color = COLOR_ACCENT, Thickness = 2, Transparency = 0.3 }, ConfirmCard)
+
+    local ConfirmSizeConstraint = create("UISizeConstraint", {
+        MinSize = Vector2.new(260, 130),
+        MaxSize = Vector2.new(280, 140)
+    }, ConfirmCard)
+
+    local ConfirmTitle = create("TextLabel", {
+        Name = "Title",
+        Size = UDim2.new(0.9, 0, 0, 20),
+        Position = UDim2.new(0.5, 0, 0.2, 0),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundTransparency = 1,
+        Text = "CLOSE SCRIPT?",
+        TextColor3 = COLOR_TEXT,
+        Font = FontFace,
+        TextSize = 13,
+        ZIndex = 112
+    }, ConfirmCard)
+
+    local ConfirmDesc = create("TextLabel", {
+        Name = "Description",
+        Size = UDim2.new(0.85, 0, 0, 35),
+        Position = UDim2.new(0.5, 0, 0.45, 0),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundTransparency = 1,
+        Text = "Active camera styles and visual post-processing effects will be terminated safely.",
+        TextColor3 = COLOR_TEXT_MUTED,
+        Font = FontFaceMedium,
+        TextSize = 10,
+        TextWrapped = true,
+        ZIndex = 112
+    }, ConfirmCard)
+
+    -- Modal Buttons (Double layout horizontally)
+    local CancelBtn = create("TextButton", {
+        Name = "CancelBtn",
+        Size = UDim2.new(0.42, 0, 0, 32),
+        Position = UDim2.new(0.08, 0, 0.78, 0),
+        BackgroundColor3 = COLOR_BG,
+        BorderSizePixel = 0,
+        Text = "Cancel",
+        TextColor3 = COLOR_TEXT,
+        Font = FontFace,
+        TextSize = 11,
+        ZIndex = 112
+    }, ConfirmCard)
+    create("UICorner", { CornerRadius = UDim.new(0, 8) }, CancelBtn)
+    local CancelStroke = create("UIStroke", { Color = COLOR_ACCENT, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Transparency = 0.5 }, CancelBtn)
+
+    local ExitConfirmBtn = create("TextButton", {
+        Name = "ExitConfirmBtn",
+        Size = UDim2.new(0.42, 0, 0, 32),
+        Position = UDim2.new(0.5, 0, 0.78, 0),
+        BackgroundColor3 = COLOR_RED,
+        BorderSizePixel = 0,
+        Text = "Confirm Exit",
+        TextColor3 = COLOR_TEXT,
+        Font = FontFace,
+        TextSize = 11,
+        ZIndex = 112
+    }, ConfirmCard)
+    create("UICorner", { CornerRadius = UDim.new(0, 8) }, ExitConfirmBtn)
+
+    -- Modal Interactive Triggers
+    local function openConfirmModal()
+        ConfirmOverlay.Visible = true
+        ConfirmCard.Size = UDim2.new(0, 0, 0, 0)
+        ConfirmOverlay.BackgroundTransparency = 1
+        
+        TweenService:Create(ConfirmOverlay, TweenInfo.new(0.25), { BackgroundTransparency = 0.55 }):Play()
+        TweenService:Create(ConfirmCard, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0.9, 0, 0.35, 0)
+        }):Play()
+    end
+
+    local function closeConfirmModal()
+        TweenService:Create(ConfirmOverlay, TweenInfo.new(0.25), { BackgroundTransparency = 1 }):Play()
+        local shrink = TweenService:Create(ConfirmCard, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+            Size = UDim2.new(0, 0, 0, 0)
+        })
+        shrink:Play()
+        task.spawn(function()
+            shrink.Completed:Wait()
+            if ConfirmOverlay.BackgroundTransparency == 1 then
+                ConfirmOverlay.Visible = false
+            end
+        end)
+    end
+
+    safeConnect(CancelBtn.MouseButton1Click, closeConfirmModal)
+
+    -- Exit Dialog Button Hover Animation System
+    safeConnect(CancelBtn.MouseEnter, function()
+        TweenService:Create(CancelBtn, TweenInfo.new(0.2), { BackgroundColor3 = COLOR_HEADER }):Play()
+    end)
+    safeConnect(CancelBtn.MouseLeave, function()
+        TweenService:Create(CancelBtn, TweenInfo.new(0.2), { BackgroundColor3 = COLOR_BG }):Play()
+    end)
+
+    safeConnect(ExitConfirmBtn.MouseEnter, function()
+        TweenService:Create(ExitConfirmBtn, TweenInfo.new(0.2), { BackgroundColor3 = Color3.fromRGB(250, 96, 80) }):Play()
+    end)
+    safeConnect(ExitConfirmBtn.MouseLeave, function()
+        TweenService:Create(ExitConfirmBtn, TweenInfo.new(0.2), { BackgroundColor3 = COLOR_RED }):Play()
+    end)
+
+    -- 5. Hide Control Card (Cinematic View - LayoutOrder 14)
     local HideCard = create("Frame", {
         Name = "HideCard",
         Size = UDim2.new(0.92, 0, 0, 48),
         BackgroundColor3 = COLOR_HEADER,
         BorderSizePixel = 0,
-        LayoutOrder = 10
+        LayoutOrder = 14
     }, ScrollFrame)
     create("UICorner", { CornerRadius = UDim.new(0, 12) }, HideCard)
 
@@ -1229,16 +1965,80 @@ local initSuccess, initError = xpcall(function()
         shrink.Completed:Wait()
         MainFrame.Visible = false
         InvisibleRestoreBtn.Visible = true -- Activate Invisible Double-tap Zone
+        
+        -- Adapt Right Vertical Slider according to style (v11.0.0 Dual Layout)
+        if cinematicSettings.CurrentStyle == "Freecam" then
+            -- Change Right Slider to spring-back Elevation flight yoke
+            FovKnob.Position = UDim2.new(0.5, 0, 0.5, 0)
+            FovProgress.Size = UDim2.new(1, 0, 0.5, 0)
+            FovLabel.Text = "↕"
+            freecamMoveInput = Vector3.new(freecamMoveInput.X, 0, freecamMoveInput.Z)
+            
+            -- Enable left drone speed slider
+            SpeedSliderFrame.Visible = true
+            SpeedSliderFrame.Size = UDim2.new(0, 20, 0, 0)
+            local speedPercent = (cinematicSettings.FreecamSpeed - 0.1) / (3.0 - 0.1)
+            SpeedKnob.Position = UDim2.new(0.5, 0, 1 - speedPercent, 0)
+            SpeedProgress.Size = UDim2.new(1, 0, speedPercent, 0)
+            SpeedLabel.Text = tostring(cinematicSettings.FreecamSpeed) .. "x"
+            
+            TweenService:Create(SpeedSliderFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                Size = UDim2.new(0, 20, 0.35, 0)
+            }):Play()
+            
+            -- Display Mobile Invisible Freecam Touchpads
+            FreecamControls.Visible = true
+        else
+            -- Change Right Slider to standard static FOV adjuster
+            local fovPercent = (cinematicSettings.FOV - 10) / (120 - 10)
+            FovKnob.Position = UDim2.new(0.5, 0, 1 - fovPercent, 0)
+            FovProgress.Size = UDim2.new(1, 0, fovPercent, 0)
+            FovLabel.Text = tostring(math.round(cinematicSettings.FOV)) .. "°"
+        end
+        
+        FovSliderFrame.Visible = true
+        FovSliderFrame.Size = UDim2.new(0, 20, 0, 0)
+        TweenService:Create(FovSliderFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+            Size = UDim2.new(0, 20, 0.35, 0)
+        }):Play()
     end
 
     local function showPanel()
         InvisibleRestoreBtn.Visible = false -- Deactivate Gesture Area
         MainFrame.Visible = true
+        FreecamControls.Visible = false
+        
         local expand = TweenService:Create(MainFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
             Size = UDim2.new(0.9, 0, 0.8, 0),
             BackgroundTransparency = 0
         })
         expand:Play()
+        
+        -- Collapse and Hide FOV/Elevation Vertical Slider
+        local shrink = TweenService:Create(FovSliderFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+            Size = UDim2.new(0, 20, 0, 0)
+        })
+        shrink:Play()
+        task.spawn(function()
+            shrink.Completed:Wait()
+            if MainFrame.Visible then
+                FovSliderFrame.Visible = false
+            end
+        end)
+        
+        -- Collapse and Hide Speed Flight Slider
+        if SpeedSliderFrame.Visible then
+            local shrinkSpeed = TweenService:Create(SpeedSliderFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+                Size = UDim2.new(0, 20, 0, 0)
+            })
+            shrinkSpeed:Play()
+            task.spawn(function()
+                shrinkSpeed.Completed:Wait()
+                if MainFrame.Visible then
+                    SpeedSliderFrame.Visible = false
+                end
+            end)
+        end
     end
 
     -- Double-Tap Gesture Logic (Fires on both PC Clicks and Mobile Touch Taps)
@@ -1259,6 +2059,10 @@ local initSuccess, initError = xpcall(function()
     -- Close & Exit Operations
     local function closeUI()
         setCinematicState(false)
+        setLetterboxState(false)
+        setGridState(false)
+        setCleanHUDState(false) -- Restores game elements safely before unloading
+        
         local fadeOut = TweenService:Create(MainFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
             Size = UDim2.new(0, 0, 0, 0),
             BackgroundTransparency = 1
@@ -1268,22 +2072,26 @@ local initSuccess, initError = xpcall(function()
         ScreenGui:Destroy()
     end
 
-    safeConnect(CloseBtn.MouseButton1Click, closeUI)
+    safeConnect(CloseBtn.MouseButton1Click, openConfirmModal)
+    safeConnect(ExitConfirmBtn.MouseButton1Click, closeUI)
 
-    -- Guard for manual destruction from external forces (prevents memory leaks)
+    -- Guard for manual destruction from external forces (prevents memory leaks & UI breakages)
     safeConnect(ScreenGui.Destroying, function()
         setCinematicState(false)
+        setLetterboxState(false)
+        setGridState(false)
+        setCleanHUDState(false) -- Failsafe restoration
     end)
 
     -- =========================================================================
     -- RUNNING LOADING SIMULATION & LAUNCH PROCESS (5-SECOND ACCUMULATIVE)
     -- =========================================================================
     task.spawn(function()
-        -- Sequential steps designed to last exactly ~5 seconds in total wait time (v9.0.0 localized modules)
+        -- Sequential steps designed to last exactly ~5 seconds in total wait time (v11.0.0 premium modules)
         local steps = {
-            { progress = 0.15, message = "Inisialisasi Core Engine v9.0.0..." },
-            { progress = 0.40, message = "Memuat Modul GoPro Bodycam & Physics Preset..." },
-            { progress = 0.65, message = "Mengkonfigurasi Pencahayaan & Efek Depth of Field..." },
+            { progress = 0.15, message = "Inisialisasi Core Engine v11.0.0..." },
+            { progress = 0.40, message = "Memuat Modul UI Sinematik, Grid, & Cinemascope..." },
+            { progress = 0.65, message = "Mengkonfigurasi Kontrol Freecam & Virtual Joystick..." },
             { progress = 0.85, message = "Memasang Proteksi Failsafe & Auto-Clipboard Handler..." },
             { progress = 1.00, message = "Modul Siap! Membuka Panel..." }
         }
