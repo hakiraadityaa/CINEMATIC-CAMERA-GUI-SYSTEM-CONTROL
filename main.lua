@@ -11,7 +11,8 @@ local cinematicSettings = {
     Grid = false,
     CleanHUD = false,
     Target = nil,
-    FreecamSpeed = 1.0     -- Drone fly speed scale (0.1x to 3.0x)
+    FreecamSpeed = 0.50,    -- Default flight speed scale
+    FreecamBaseSpeed = 4.0  -- CONFIGURABLE: Lowered from 8 to 4 for ultra-slow majestic crawl! (script by hakiraadityaa)
 }
 
 -- Modern Styling Theme Colors
@@ -118,6 +119,13 @@ local initSuccess, initError = xpcall(function()
     local freecamTargetYaw = 0
     local freecamMoveInput = Vector3.new()
     local mobileMoving = false
+    local rotatingActive = false
+
+    -- Multi-Touch Isolation Reference Variables [V11.2.0 Touch Locks]
+    local currentMoveInputObject = nil
+    local currentRotateInputObject = nil
+    local currentVerticalInputObject = nil
+    local currentSpeedInputObject = nil
 
     local function saveCamera()
         local cam = workspace.CurrentCamera
@@ -218,7 +226,6 @@ local initSuccess, initError = xpcall(function()
     local function updateKeyboardInput()
         if not cinematicSettings.Active or cinematicSettings.CurrentStyle ~= "Freecam" then return end
         
-        -- Ignore typing input if active
         if UserInputService:GetFocusedTextBox() then return end
         
         local x, y, z = 0, 0, 0
@@ -229,7 +236,6 @@ local initSuccess, initError = xpcall(function()
         if UserInputService:IsKeyDown(Enum.KeyCode.E) or UserInputService:IsKeyDown(Enum.KeyCode.Space) then y = 1 end
         if UserInputService:IsKeyDown(Enum.KeyCode.Q) or UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then y = -1 end
         
-        -- Override if virtual mobile joystick is inactive
         if not mobileMoving then
             freecamMoveInput = Vector3.new(x, y, z)
         end
@@ -252,12 +258,12 @@ local initSuccess, initError = xpcall(function()
         local cam = workspace.CurrentCamera
         cam.CameraType = Enum.CameraType.Scriptable
         
-        -- Inisialisasi posisi dan orientasi tanpa snapping jika memilih Freecam
+        -- Inisialisasi posisi dan orientasi tanpa snapping jika memilih Freecam (math.deg Patched)
         if cinematicSettings.CurrentStyle == "Freecam" then
             freecamCFrame = cam.CFrame
             local rx, ry, rz = freecamCFrame:ToOrientation()
-            freecamPitch = math.clamp(math.degrees(rx), -85, 85)
-            freecamYaw = math.degrees(ry)
+            freecamPitch = math.clamp(math.deg(rx), -85, 85)
+            freecamYaw = math.deg(ry)
             freecamTargetPitch = freecamPitch
             freecamTargetYaw = freecamYaw
             freecamVelocity = Vector3.new()
@@ -268,7 +274,7 @@ local initSuccess, initError = xpcall(function()
         cameraConnection = RunService.RenderStepped:Connect(function(dt)
             local hrp = getFocusTarget()
             
-            -- Freecam Mode Update Logic (v11.0.0 Feature)
+            -- Freecam Mode Update Logic
             if cinematicSettings.CurrentStyle == "Freecam" then
                 updateKeyboardInput()
                 
@@ -284,8 +290,8 @@ local initSuccess, initError = xpcall(function()
                 local moveDir = rotationCF:VectorToWorldSpace(localMove)
                 moveDir = moveDir + Vector3.new(0, freecamMoveInput.Y, 0) -- Vertical Ascend/Descend
                 
-                -- Velocity interpolation with Momentum/Friction damping
-                local targetVelocity = moveDir * (25 * cinematicSettings.FreecamSpeed)
+                -- Velocity interpolation with Momentum/Friction damping & Base Speed Configuration
+                local targetVelocity = moveDir * (cinematicSettings.FreecamBaseSpeed * cinematicSettings.FreecamSpeed)
                 freecamVelocity = freecamVelocity:Lerp(targetVelocity, 0.12)
                 
                 freecamCFrame = CFrame.new(freecamCFrame.Position + (freecamVelocity * dt)) * rotationCF
@@ -875,7 +881,6 @@ local initSuccess, initError = xpcall(function()
         Padding = UDim.new(0, 8)
     })
 
-    -- Styles list containing "Freecam" Style #10 (v11.0.0 Feature)
     local styles = {"Orbit", "Epic Pan", "Dynamic Follow", "Handheld Shaky", "Static Scenic", "Dolly Zoom", "Crane Shot", "Side Profile", "Bodycam", "Freecam"}
     local styleButtons = {}
 
@@ -1441,11 +1446,11 @@ local initSuccess, initError = xpcall(function()
     end)
 
     -- =========================================================================
-    -- NEW HIGH-END UX ADDITIONS: TRANSPARENT VERTICAL FOV / ELEVATION SLIDER
+    -- HIGH-END UX ADDITIONS: TRANSPARENT VERTICAL FOV / ELEVATION SLIDER
     -- =========================================================================
     local FovSliderFrame = create("Frame", {
         Name = "FovSliderFrame",
-        Size = UDim2.new(0, 20, 0, 0), -- Starts collapsed
+        Size = UDim2.new(0, 20, 0, 0),
         Position = UDim2.new(1, -25, 0.5, 0),
         AnchorPoint = Vector2.new(1, 0.5),
         BackgroundTransparency = 1,
@@ -1511,12 +1516,12 @@ local initSuccess, initError = xpcall(function()
         local percentage = 1 - math.clamp((posY - trackPosY) / trackHeight, 0, 1)
         
         if cinematicSettings.CurrentStyle == "Freecam" then
-            -- Elevation Flight Joystick Mode (Relative to center spring 0.5)
-            local offsetFromCenter = percentage - 0.5 -- range -0.5 to 0.5
+            -- Elevation Flight Joystick Mode (Spring Joystick)
+            local offsetFromCenter = percentage - 0.5
             FovKnob.Position = UDim2.new(0.5, 0, 1 - percentage, 0)
             FovProgress.Size = UDim2.new(1, 0, percentage, 0)
             
-            local vertInput = offsetFromCenter * 2.0 -- scale -1.0 to 1.0
+            local vertInput = offsetFromCenter * 2.0
             freecamMoveInput = Vector3.new(freecamMoveInput.X, vertInput, freecamMoveInput.Z)
             FovLabel.Text = vertInput > 0.15 and "▲" or (vertInput < -0.15 and "▼" or "•")
         else
@@ -1531,7 +1536,8 @@ local initSuccess, initError = xpcall(function()
     end
 
     safeConnect(FovKnob.InputBegan, function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and not currentVerticalInputObject then
+            currentVerticalInputObject = input
             fovDragging = true
             TweenService:Create(FovKnob, TweenInfo.new(0.2), { BackgroundTransparency = 0.1 }):Play()
             TweenService:Create(FovLabel, TweenInfo.new(0.2), { TextTransparency = 0.1 }):Play()
@@ -1539,18 +1545,19 @@ local initSuccess, initError = xpcall(function()
     end)
 
     safeConnect(UserInputService.InputChanged, function(input)
-        if fovDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        if fovDragging and input == currentVerticalInputObject then
             updateVerticalSlider(input)
         end
     end)
 
     safeConnect(UserInputService.InputEnded, function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if input == currentVerticalInputObject then
             fovDragging = false
+            currentVerticalInputObject = nil
             TweenService:Create(FovKnob, TweenInfo.new(0.2), { BackgroundTransparency = 0.4 }):Play()
             TweenService:Create(FovLabel, TweenInfo.new(0.2), { TextTransparency = 0.5 }):Play()
             
-            -- Spring-back mechanical effect specifically for Elevation Flight Joystick
+            -- Spring-back mechanical effect for Elevation Flight Joystick
             if cinematicSettings.CurrentStyle == "Freecam" then
                 TweenService:Create(FovKnob, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
                     Position = UDim2.new(0.5, 0, 0.5, 0)
@@ -1565,7 +1572,7 @@ local initSuccess, initError = xpcall(function()
     end)
 
     -- =========================================================================
-    -- NEW MOBILE-ONLY FREECAM CONTROLS (MOVEPAD, ROTATEPAD, JOYSTICK)
+    -- MOBILE-ONLY FREECAM CONTROLS (MOVEPAD, ROTATEPAD) - [JOYS REMOVED IN V11.2.0]
     -- =========================================================================
     local FreecamControls = create("Frame", {
         Name = "FreecamControls",
@@ -1576,7 +1583,7 @@ local initSuccess, initError = xpcall(function()
         Visible = false
     }, ScreenGui)
 
-    -- Left Touch Pad for movement joystick activation
+    -- Left Touch Pad for movement joystick activation (Fully Invisible)
     local LeftMovePad = create("Frame", {
         Name = "LeftMovePad",
         Size = UDim2.new(0.45, 0, 0.8, 0),
@@ -1586,7 +1593,7 @@ local initSuccess, initError = xpcall(function()
         ZIndex = 59
     }, FreecamControls)
 
-    -- Right Touch Pad for panning camera rotation yaw/pitch
+    -- Right Touch Pad for panning camera rotation yaw/pitch (Fully Invisible)
     local RightRotatePad = create("Frame", {
         Name = "RightRotatePad",
         Size = UDim2.new(0.45, 0, 0.8, 0),
@@ -1596,36 +1603,10 @@ local initSuccess, initError = xpcall(function()
         ZIndex = 59
     }, FreecamControls)
 
-    -- Neon Virtual Joystick
-    local JoyRing = create("Frame", {
-        Name = "JoyRing",
-        Size = UDim2.new(0, 70, 0, 70),
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        BackgroundColor3 = COLOR_ACCENT,
-        BackgroundTransparency = 0.8,
-        BorderSizePixel = 0,
-        ZIndex = 60,
-        Visible = false
-    }, ScreenGui)
-    create("UICorner", { CornerRadius = UDim.new(0, 35) }, JoyRing)
-    create("UIStroke", { Color = COLOR_ACCENT, Thickness = 1.5, Transparency = 0.4 }, JoyRing)
-
-    local JoyKnob = create("Frame", {
-        Name = "JoyKnob",
-        Size = UDim2.new(0, 30, 0, 30),
-        AnchorPoint = Vector2.new(0.5, 0.5),
-        Position = UDim2.new(0.5, 0, 0.5, 0),
-        BackgroundColor3 = COLOR_TEXT,
-        BackgroundTransparency = 0.4,
-        BorderSizePixel = 0,
-        ZIndex = 61
-    }, JoyRing)
-    create("UICorner", { CornerRadius = UDim.new(0, 15) }, JoyKnob)
-
     -- Left Flight Speed Slider (Specifically for Drone velocity tuning)
     local SpeedSliderFrame = create("Frame", {
         Name = "SpeedSliderFrame",
-        Size = UDim2.new(0, 20, 0, 0), -- Starts collapsed
+        Size = UDim2.new(0, 20, 0, 0),
         Position = UDim2.new(0, 25, 0.5, 0),
         AnchorPoint = Vector2.new(0, 0.5),
         BackgroundTransparency = 1,
@@ -1674,7 +1655,7 @@ local initSuccess, initError = xpcall(function()
         Position = UDim2.new(2, 6, 0.5, 0),
         AnchorPoint = Vector2.new(0, 0.5),
         BackgroundTransparency = 1,
-        Text = "1.0x",
+        Text = "0.50x",
         TextColor3 = COLOR_TEXT,
         TextTransparency = 0.5,
         Font = FontFace,
@@ -1682,7 +1663,7 @@ local initSuccess, initError = xpcall(function()
         TextXAlignment = Enum.TextXAlignment.Left
     }, SpeedKnob)
 
-    -- Left Flight Speed Slider Drag Handler
+    -- Left Flight Speed Slider Drag Handler [V11.2.0 Precision]
     local speedDragging = false
     local function updateFlightSpeed(input)
         local posY = input.Position.Y
@@ -1693,14 +1674,17 @@ local initSuccess, initError = xpcall(function()
         SpeedKnob.Position = UDim2.new(0.5, 0, 1 - percentage, 0)
         SpeedProgress.Size = UDim2.new(1, 0, percentage, 0)
         
-        -- Map speed from 0.1x crawl speed to 3.0x high flyby speed
-        local speedScale = math.round((0.1 + (3.0 - 0.1) * percentage) * 10) / 10
+        -- High Precision mapping: 0.01x to 4.0x
+        local speedScale = 0.01 + (4.0 - 0.01) * percentage
+        speedScale = math.round(speedScale * 100) / 100
+        
         cinematicSettings.FreecamSpeed = speedScale
-        SpeedLabel.Text = tostring(speedScale) .. "x"
+        SpeedLabel.Text = string.format("%.2fx", speedScale)
     end
 
     safeConnect(SpeedKnob.InputBegan, function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and not currentSpeedInputObject then
+            currentSpeedInputObject = input
             speedDragging = true
             TweenService:Create(SpeedKnob, TweenInfo.new(0.2), { BackgroundTransparency = 0.1 }):Play()
             TweenService:Create(SpeedLabel, TweenInfo.new(0.2), { TextTransparency = 0.1 }):Play()
@@ -1708,88 +1692,75 @@ local initSuccess, initError = xpcall(function()
     end)
 
     safeConnect(UserInputService.InputChanged, function(input)
-        if speedDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        if speedDragging and input == currentSpeedInputObject then
             updateFlightSpeed(input)
         end
     end)
 
     safeConnect(UserInputService.InputEnded, function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if input == currentSpeedInputObject then
             speedDragging = false
+            currentSpeedInputObject = nil
             TweenService:Create(SpeedKnob, TweenInfo.new(0.2), { BackgroundTransparency = 0.4 }):Play()
             TweenService:Create(SpeedLabel, TweenInfo.new(0.2), { TextTransparency = 0.5 }):Play()
         end
     end)
 
-    -- Left Mobile Move Touchpad Gesture (Joystick Calculations)
+    -- Left Mobile Move Touchpad Gesture (Multi-Touch Locked - v11.2.0)
     local moveTouchStart = nil
     safeConnect(LeftMovePad.InputBegan, function(input)
-        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1) and not currentMoveInputObject then
+            currentMoveInputObject = input
             mobileMoving = true
-            local touchPos = input.Position
-            moveTouchStart = touchPos
-            
-            JoyRing.Position = UDim2.new(0, touchPos.X, 0, touchPos.Y)
-            JoyKnob.Position = UDim2.new(0.5, 0, 0.5, 0)
-            JoyRing.Visible = true
-            
-            local dragConnection
-            dragConnection = safeConnect(UserInputService.InputChanged, function(dragInput)
-                if mobileMoving and (dragInput.UserInputType == Enum.UserInputType.Touch or dragInput.UserInputType == Enum.UserInputType.MouseMovement) then
-                    local delta = dragInput.Position - moveTouchStart
-                    local dist = delta.Magnitude
-                    local dir = dist > 0.1 and delta.Unit or Vector3.new()
-                    
-                    local maxRadius = 35
-                    JoyKnob.Position = UDim2.new(0.5, dir.X * math.min(dist, maxRadius), 0.5, dir.Y * math.min(dist, maxRadius))
-                    
-                    -- Screen Y vector points down, map directly to standard -Z forward, +Z back movement
-                    freecamMoveInput = Vector3.new(dir.X, freecamMoveInput.Y, dir.Y)
-                end
-            end)
-            
-            local endConnection
-            endConnection = safeConnect(input.Changed, function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    mobileMoving = false
-                    JoyRing.Visible = false
-                    freecamMoveInput = Vector3.new(0, freecamMoveInput.Y, 0)
-                    dragConnection:Disconnect()
-                    endConnection:Disconnect()
-                end
-            end)
+            moveTouchStart = input.Position
         end
     end)
 
-    -- Right Mobile Rotate Touchpad Gesture (Look Around Calculations)
+    safeConnect(UserInputService.InputChanged, function(input)
+        if mobileMoving and input == currentMoveInputObject then
+            local delta = input.Position - moveTouchStart
+            local dist = delta.Magnitude
+            local dir = dist > 0.1 and delta.Unit or Vector3.new()
+            
+            -- Screen Y vector points down, map directly to standard -Z forward, +Z back movement
+            freecamMoveInput = Vector3.new(dir.X, freecamMoveInput.Y, dir.Y)
+        end
+    end)
+
+    safeConnect(UserInputService.InputEnded, function(input)
+        if input == currentMoveInputObject then
+            mobileMoving = false
+            currentMoveInputObject = nil
+            freecamMoveInput = Vector3.new(0, freecamMoveInput.Y, 0)
+        end
+    end)
+
+    -- Right Mobile Rotate Touchpad Gesture (Multi-Touch Locked - v11.2.0)
     local rotateTouchLast = nil
-    local rotatingActive = false
     safeConnect(RightRotatePad.InputBegan, function(input)
-        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1) and not currentRotateInputObject then
+            currentRotateInputObject = input
             rotatingActive = true
             rotateTouchLast = input.Position
+        end
+    end)
+
+    safeConnect(UserInputService.InputChanged, function(input)
+        if rotatingActive and input == currentRotateInputObject then
+            local currentPos = input.Position
+            local delta = currentPos - rotateTouchLast
+            rotateTouchLast = currentPos
             
-            local rotateConnection
-            rotateConnection = safeConnect(UserInputService.InputChanged, function(dragInput)
-                if rotatingActive and (dragInput.UserInputType == Enum.UserInputType.Touch or dragInput.UserInputType == Enum.UserInputType.MouseMovement) then
-                    local currentPos = dragInput.Position
-                    local delta = currentPos - rotateTouchLast
-                    rotateTouchLast = currentPos
-                    
-                    local sensitivity = 0.25
-                    freecamTargetYaw = freecamTargetYaw - (delta.X * sensitivity)
-                    freecamTargetPitch = freecamTargetPitch - (delta.Y * sensitivity)
-                end
-            end)
-            
-            local endConnection
-            endConnection = safeConnect(input.Changed, function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    rotatingActive = false
-                    rotateConnection:Disconnect()
-                    endConnection:Disconnect()
-                end
-            end)
+            local sensitivity = 0.25
+            freecamTargetYaw = freecamTargetYaw - (delta.X * sensitivity)
+            freecamTargetPitch = freecamTargetPitch - (delta.Y * sensitivity)
+        end
+    end)
+
+    safeConnect(UserInputService.InputEnded, function(input)
+        if input == currentRotateInputObject then
+            rotatingActive = false
+            currentRotateInputObject = nil
         end
     end)
 
@@ -1966,7 +1937,7 @@ local initSuccess, initError = xpcall(function()
         MainFrame.Visible = false
         InvisibleRestoreBtn.Visible = true -- Activate Invisible Double-tap Zone
         
-        -- Adapt Right Vertical Slider according to style (v11.0.0 Dual Layout)
+        -- Adapt Right Vertical Slider according to style
         if cinematicSettings.CurrentStyle == "Freecam" then
             -- Change Right Slider to spring-back Elevation flight yoke
             FovKnob.Position = UDim2.new(0.5, 0, 0.5, 0)
@@ -1977,10 +1948,10 @@ local initSuccess, initError = xpcall(function()
             -- Enable left drone speed slider
             SpeedSliderFrame.Visible = true
             SpeedSliderFrame.Size = UDim2.new(0, 20, 0, 0)
-            local speedPercent = (cinematicSettings.FreecamSpeed - 0.1) / (3.0 - 0.1)
+            local speedPercent = (cinematicSettings.FreecamSpeed - 0.01) / (4.0 - 0.01)
             SpeedKnob.Position = UDim2.new(0.5, 0, 1 - speedPercent, 0)
             SpeedProgress.Size = UDim2.new(1, 0, speedPercent, 0)
-            SpeedLabel.Text = tostring(cinematicSettings.FreecamSpeed) .. "x"
+            SpeedLabel.Text = string.format("%.2fx", cinematicSettings.FreecamSpeed)
             
             TweenService:Create(SpeedSliderFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
                 Size = UDim2.new(0, 20, 0.35, 0)
@@ -2087,9 +2058,9 @@ local initSuccess, initError = xpcall(function()
     -- RUNNING LOADING SIMULATION & LAUNCH PROCESS (5-SECOND ACCUMULATIVE)
     -- =========================================================================
     task.spawn(function()
-        -- Sequential steps designed to last exactly ~5 seconds in total wait time (v11.0.0 premium modules)
+        -- Sequential steps designed to last exactly ~5 seconds in total wait time
         local steps = {
-            { progress = 0.15, message = "Inisialisasi Core Engine v11.0.0..." },
+            { progress = 0.15, message = "Inisialisasi Core Engine v11.2.0..." },
             { progress = 0.40, message = "Memuat Modul UI Sinematik, Grid, & Cinemascope..." },
             { progress = 0.65, message = "Mengkonfigurasi Kontrol Freecam & Virtual Joystick..." },
             { progress = 0.85, message = "Memasang Proteksi Failsafe & Auto-Clipboard Handler..." },
