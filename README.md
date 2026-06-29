@@ -1,4 +1,4 @@
-# Cinematic Camera GUI & System Control `V7.0 - Advanced`
+# Cinematic Camera GUI & System Control `V11.2.0 - Advanced`
 
 <p align="center">
   <img src="https://c.tenor.com/wrqESzPzXvMAAAAC/tenor.gif" alt="MegaKot GIF" width="410">
